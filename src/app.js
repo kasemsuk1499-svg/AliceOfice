@@ -131,27 +131,37 @@ function chooseLoadingSheet(wb,iso){
 }
 function extractLoading(wb,kind,iso,plan,manifests){
  const sheetName=chooseLoadingSheet(wb,iso),rows=C().sheetRows(wb,sheetName);
- const vehicles=[];let context={contract:'',booking:'',agent:'',etd:'',destination:'',returnPlace:''};
- const planMap=new Map(plan.map(x=>[x.booking,x]));
- let current=null;
+ const vehicles=[];
+ let context={contract:'',booking:'',agent:'',etd:'',destination:'',returnPlace:''},current=null;
+ const planMap=new Map(plan.map(j=>[j.booking,j]));
+ function validBooking(book){return /^[A-Z0-9][A-Z0-9/-]{5,}$/i.test(book)&&/\d/.test(book)&&!/^(quantity|booking|date)/i.test(book)}
  function pushItem(row){
   const product=C().clean(row[12]||row[1]),batch=C().clean(row[14]),code=C().clean(row[15]);
-  const nbag=Number(row[18])||0,kg=Number(row[19])||0;
-  if(product||batch||code||nbag||kg){current.items.push({product,batch,code,bags:nbag,kg});}
+  const contract=C().clean(row[0]);
+  const bags=Number(row[18])||0,kg=Number(row[19])||0;
+  if(product||batch||code||bags||kg)current.items.push({product,batch,code,bags,kg,contract:/^S?PTR?\d{4}|^TSP\d{4}/i.test(contract)?contract:''});
  }
  for(let k=0;k<rows.length;k++){
-  const row=rows[k],no=Number(row[7]);const book=C().clean(row[3]);
-  if(book)context={...context,contract:C().clean(row[0])||context.contract,booking:book,agent:C().clean(row[4])||context.agent,etd:C().clean(row[5])||context.etd};
+  const row=rows[k],no=Number(row[7]),book=C().clean(row[3]);
+  const bookingPresent=validBooking(book);
+  const header=C().clean(row[7]).toLowerCase()==='no.';
+  if(bookingPresent){
+   context={...context,booking:book,contract:C().clean(row[0])||context.contract,agent:C().clean(row[4])||context.agent,etd:C().clean(row[5])||context.etd,destination:'',returnPlace:''};
+  }
+  if(header){current=null;continue}
   const isCar=Number.isInteger(no)&&no>=1&&no<=200&&C().clean(row[7])!=='';
   if(isCar){
+   if(!context.booking)continue;
    const planJob=planMap.get(context.booking);
-   current={kind,sheetName,row:k+1,carNo:no,booking:context.booking,contract:context.contract||planJob?.contract||'',agent:context.agent||planJob?.agent||'',etd:planJob?.etd||context.etd,destination:planJob?.destination||'',returnPlace:planJob?.place||'',carrier:C().clean(row[8]),registration:C().clean(row[9]),container:C().clean(row[10]),seal:C().clean(row[11]),weightCard:C().clean(row[20]),tare:Number(row[21])||null,gross:Number(row[22])||null,net:Number(row[23])||null,driver:'',items:[],sourceName:sheetName,hasManifest:false};
+   current={kind,sheetName,row:k+1,carNo:no,booking:context.booking,contract:context.contract||planJob?.contract||'',agent:context.agent||planJob?.agent||'',etd:planJob?.etd||context.etd,destination:planJob?.destination||context.destination,returnPlace:planJob?.place||context.returnPlace,carrier:C().clean(row[8]),registration:C().clean(row[9]),container:C().clean(row[10]),seal:C().clean(row[11]),weightCard:C().clean(row[20]),tare:Number(row[21])||null,gross:Number(row[22])||null,net:Number(row[23])||null,driver:'',items:[],sourceName:sheetName,hasManifest:false};
    vehicles.push(current);pushItem(row);
   }else if(current){
-   // A detail row may follow the car's anchor; avoid crossing booking boundaries or repeated table headers.
-   const header=C().clean(row[7]).toLowerCase()==='no.';
-   if(header){current=null;continue}
-   if(book&&book!==current.booking){current=null;continue}
+   if(bookingPresent&&book!==current.booking){current=null;continue}
+   const f=C().clean(row[5]);
+   if(/^[A-Z][A-Z -]{2,32}$/.test(f)&&!/ETD|FCL|CONTRACT/i.test(f)){
+    context.destination=f;
+    current.destination ||= f;
+   }
    if(C().clean(row[12])||C().clean(row[14])||C().clean(row[15])||Number(row[18])||Number(row[19]))pushItem(row);
   }
  }
@@ -161,6 +171,7 @@ function extractLoading(wb,kind,iso,plan,manifests){
   if(truck){
    v.hasManifest=true;v.registration ||= truck.registration;v.container ||= truck.container;v.seal ||= truck.seal;v.tare ||= truck.tare;v.carrier ||= truck.carrier;v.driver ||= truck.driver;
   }
+  v.contract=Array.from(new Set([v.contract,...v.items.map(i=>i.contract)].filter(Boolean))).join(' / ');
   v.product=Array.from(new Set(v.items.map(i=>i.product).filter(Boolean))).join(' / ');
   v.batch=Array.from(new Set(v.items.map(i=>i.batch).filter(Boolean))).join(' / ');
   v.code=v.items.filter(i=>i.code).map(i=>i.code+(i.bags?'('+i.bags+'Bag)':'')).join(' / ');
@@ -352,23 +363,30 @@ async function createDaily(){
   if(!expSheet)throw Error('ไม่พบชีต Export '+exportSheetName);
   const rows=C().sheetRows(exportOriginal,exportSheetName),map=exportMap(kind);
   const rowIndex=new Map();let last=6;
+  const serialDate=C().excelDate(iso);
   for(let r=6;r<=rows.length;r++){
    const cells=rows[r-1]||[];
    const booking=C().clean(cells[colIndex(map.booking)]);
    const car=C().clean(cells[colIndex(map.car)]);
+   const date=Number(cells[colIndex(map.date)])||0;
    if(booking)last=Math.max(last,r);
-   if(booking&&car)rowIndex.set(booking+'|'+car,r);
+   if(booking&&car&&date===serialDate)rowIndex.set(booking+'|'+car,r);
   }
   let next=last+1,matched=0,appended=0;
   for(const v of list){
    if(!v.container&&$('strictMode').value==='strict')throw Error('ยังไม่มีเลขตู้ '+v.booking+' คัน '+v.carNo+' กรุณากรอกก่อนสร้าง');
    const identity=v.booking+'|'+v.carNo;
    let target=rowIndex.get(identity);
-   if(!target){target=next++;appended++;await preserveNewRowStyle(expPatch,expSheet,Math.max(6,last),target);rowIndex.set(identity,target)}
-   else matched++;
+   if(target){
+    const oldCont=C().clean((rows[target-1]||[])[colIndex(map.container)]);
+    if(oldCont&&v.container&&oldCont!==v.container)throw Error('เลขตู้ขัดแย้งใน Export: '+v.booking+' คัน '+v.carNo+' ('+oldCont+' / '+v.container+')');
+    matched++;
+   }else{
+    target=next++;appended++;await preserveNewRowStyle(expPatch,expSheet,Math.max(6,last),target);rowIndex.set(identity,target);
+   }
    const writableLoad={I:v.carrier,J:v.registration,K:v.container,L:v.seal,U:v.weightCard,V:v.tare,W:v.gross,X:v.net};
    for(const [col,val] of Object.entries(writableLoad))if(val!==null&&val!==undefined&&val!=='')await loadPatch.setCell(loadSheet,col+v.row,val);
-   const obj={date:C().excelDate(iso),contract:v.contract,booking:v.booking,agent:v.agent,etd:(v.etd||'')+(v.destination?'/'+v.destination:''),receipt:'',place:v.returnPlace,product:v.product,batch:v.batch,code:v.code,bags:v.bags||null,kg:v.kg||null,tare:v.tare,gross:v.gross,net:v.net,carrier:v.carrier,car:v.carNo,registration:v.registration,driver:v.driver,container:v.container,seal:v.seal,weightCard:v.weightCard};
+   const obj={date:C().excelDate(iso),contract:v.contract,booking:v.booking,agent:v.agent,etd:(v.etd&&v.destination)?v.etd+'/'+v.destination:null,receipt:'',place:v.returnPlace,product:v.product,batch:v.batch,code:v.code,bags:v.bags||null,kg:v.kg||null,tare:v.tare,gross:v.gross,net:v.net,carrier:v.carrier,car:v.carNo,registration:v.registration,driver:v.driver,container:v.container,seal:v.seal,weightCard:v.weightCard};
    // Do not overwrite unknown fields with synthetic values.
    for(const [key,col] of Object.entries(map)){
     const value=obj[key];if(value!==null&&value!==undefined&&value!=='')await expPatch.setCell(expSheet,col+target,value);
