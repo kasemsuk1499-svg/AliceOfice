@@ -371,31 +371,42 @@ async function createDaily(){
   const expSheet=expPatch.sheetByName(exportSheetName);
   if(!expSheet)throw Error('ไม่พบชีต Export '+exportSheetName);
   const rows=C().sheetRows(exportOriginal,exportSheetName),map=exportMap(kind);
-  const rowIndex=new Map();let last=6;
+  const rowIndex=new Map(),regIndex=new Map(),usedTargets=new Set();
+  let last=6,maxDayCar=0;
   const serialDate=C().excelDate(iso);
+  const key=(book,code)=>C().clean(book)+'|'+C().clean(code).replace(/\s+/g,'').toUpperCase();
   for(let r=6;r<=rows.length;r++){
    const cells=rows[r-1]||[];
    const booking=C().clean(cells[colIndex(map.booking)]);
-   const car=C().clean(cells[colIndex(map.car)]);
+   const cont=C().clean(cells[colIndex(map.container)]);
+   const reg=C().clean(cells[colIndex(map.registration)]);
    const date=Number(cells[colIndex(map.date)])||0;
    if(booking)last=Math.max(last,r);
-   if(booking&&car&&date===serialDate)rowIndex.set(booking+'|'+car,r);
+   if(booking&&date===serialDate){
+    if(cont)rowIndex.set(key(booking,cont),r);
+    if(reg)regIndex.set(key(booking,reg),r);
+    maxDayCar=Math.max(maxDayCar,Number(cells[colIndex(map.car)])||0);
+   }
   }
   let next=last+1,matched=0,appended=0;
   for(const v of list){
    if(!v.container&&$('strictMode').value==='strict')throw Error('ยังไม่มีเลขตู้ '+v.booking+' คัน '+v.carNo+' กรุณากรอกก่อนสร้าง');
-   const identity=v.booking+'|'+v.carNo;
-   let target=rowIndex.get(identity);
+   const identity=key(v.booking,v.container);
+   let target=v.container?rowIndex.get(identity):null;
+   if(!target&&v.registration)target=regIndex.get(key(v.booking,v.registration));
    if(target){
     const oldCont=C().clean((rows[target-1]||[])[colIndex(map.container)]);
-    if(oldCont&&v.container&&oldCont!==v.container)throw Error('เลขตู้ขัดแย้งใน Export: '+v.booking+' คัน '+v.carNo+' ('+oldCont+' / '+v.container+')');
+    if(oldCont&&v.container&&key(v.booking,oldCont)!==identity)throw Error('เลขตู้ขัดแย้งใน Export: '+v.booking+' คัน '+v.carNo+' ('+oldCont+' / '+v.container+')');
+    if(usedTargets.has(target))throw Error('มีรถสองคันชี้ไปที่แถว Export เดียวกัน: '+v.booking+' '+v.container);
     matched++;
    }else{
-    target=next++;appended++;await preserveNewRowStyle(expPatch,expSheet,Math.max(6,last),target);rowIndex.set(identity,target);
+    target=next++;appended++;await preserveNewRowStyle(expPatch,expSheet,Math.max(6,last),target);
    }
+   usedTargets.add(target);
+   const exportCarNumber=target<=rows.length?Number((rows[target-1]||[])[colIndex(map.car)])||++maxDayCar:++maxDayCar;
    const writableLoad={I:v.carrier,J:v.registration,K:v.container,L:v.seal,U:v.weightCard,V:v.tare,W:v.gross,X:v.net};
    for(const [col,val] of Object.entries(writableLoad))if(val!==null&&val!==undefined&&val!=='')await loadPatch.setCell(loadSheet,col+v.row,val);
-   const obj={date:C().excelDate(iso),contract:v.contract,booking:v.booking,agent:v.agent,etd:(v.etd&&v.destination)?v.etd+'/'+v.destination:null,receipt:'',place:v.returnPlace,product:v.product,batch:v.batch,code:v.code,bags:v.bags||null,kg:v.kg||null,tare:v.tare,gross:v.gross,net:v.net,carrier:v.carrier,car:v.carNo,registration:v.registration,driver:v.driver,container:v.container,seal:v.seal,weightCard:v.weightCard};
+   const obj={date:C().excelDate(iso),contract:v.contract,booking:v.booking,agent:v.agent,etd:(v.etd&&v.destination)?v.etd+'/'+v.destination:null,receipt:'',place:v.returnPlace,product:v.product,batch:v.batch,code:v.code,bags:v.bags||null,kg:v.kg||null,tare:v.tare,gross:v.gross,net:v.net,carrier:v.carrier,car:exportCarNumber,registration:v.registration,driver:v.driver,container:v.container,seal:v.seal,weightCard:v.weightCard};
    // Do not overwrite unknown fields with synthetic values.
    for(const [key,col] of Object.entries(map)){
     const value=obj[key];if(value!==null&&value!==undefined&&value!=='')await expPatch.setCell(expSheet,col+target,value);
