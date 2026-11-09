@@ -198,6 +198,20 @@ class ExcelPatch {
   const o=this.contentTypes.createElementNS(NS.ct,'Override');o.setAttribute('PartName',name);o.setAttribute('ContentType',type);root.appendChild(o);
  }
  async save(filename){
+  // Excel's calcChain lists formula cells by address. If Loading/Export data are
+  // synchronized, cached formulas can become stale. Remove the chain entirely,
+  // including its relationship and content-type entry; Excel rebuilds it safely.
+  if(this.zip.file('xl/calcChain.xml')){
+   this.zip.remove('xl/calcChain.xml');
+   for(const rel of l(this.bookRels.documentElement,'Relationship')){
+    if(attr(rel,'Type').endsWith('/calcChain'))rel.remove();
+   }
+   for(const override of l(this.contentTypes.documentElement,'Override')){
+    if(attr(override,'PartName')==='/xl/calcChain.xml')override.remove();
+   }
+   const cp=one(this.book.documentElement,'calcPr');
+   if(cp){cp.setAttribute('fullCalcOnLoad','1');cp.setAttribute('forceFullCalc','1')}
+  }
   for(const [path,d] of this.docs)this.zip.file(path,serialize(d));
   const blob=await this.zip.generateAsync({type:'blob',compression:'DEFLATE',compressionOptions:{level:6}});
   return {filename,blob};
