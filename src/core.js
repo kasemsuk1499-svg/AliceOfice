@@ -205,7 +205,7 @@ class ExcelPatch {
 }
 function saveBlob(file){const url=URL.createObjectURL(file.blob);const a=document.createElement('a');a.href=url;a.download=file.filename;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),10000)}
 function parseXlsx(file){if(!window.XLSX)throw Error('ไลบรารีอ่าน Excel ไม่พร้อม');return fileArrayBuffer(file).then(buf=>XLSX.read(buf,{type:'array',cellDates:false,raw:true}))}
-function sheetRows(wb,name){const s=wb.Sheets[name];if(!s)throw Error('ไม่พบชีต '+name);return XLSX.utils.sheet_to_json(s,{header:1,raw:true,defval:'',blankrows:false})}
+function sheetRows(wb,name){const s=wb.Sheets[name];if(!s)throw Error('ไม่พบชีต '+name);return XLSX.utils.sheet_to_json(s,{header:1,raw:true,defval:'',blankrows:true})}
 function textAt(r,col){return clean((r||[])[col])}
 window.AliceCore={NS,l,one,find,all,xml,join,relPath,ExcelPatch,saveBlob,csvParse,field,cancelled,dateFcl,classify,quantityEstimate,parseProducts,planRecords,excelDate,parseXlsx,sheetRows,textAt,clean};
 })();
