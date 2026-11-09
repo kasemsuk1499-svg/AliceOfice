@@ -457,9 +457,39 @@ async function generate(){
   $('resultsCard').classList.remove('hidden');$('resultsCard').scrollIntoView({behavior:'smooth',block:'start'});
   status('สร้างไฟล์สำเร็จ '+results.length+' ไฟล์ ตรวจสอบ Print Preview ก่อนนำไปใช้จริงนะคะ 💕','good');
   log('สร้างไฟล์เสร็จ '+results.length+' ไฟล์');
+  if(window.AliceCloud?.isAuthenticated?.()){
+   try{
+    const cloudSaved=await window.AliceCloud.saveRun(cloudSnapshot());
+    log('Supabase บันทึกงานและไฟล์ '+cloudSaved.saved+' ไฟล์');
+    status('Excel สำเร็จ '+results.length+' ไฟล์ และซิงก์เข้าคลังส่วนตัวเรียบร้อยแล้ว ☁️','good');
+   }catch(cloudError){
+    log('CLOUD ERROR '+cloudError.message);
+    status('สร้าง Excel สำเร็จแล้ว แต่ซิงก์ Supabase ไม่สำเร็จ: '+cloudError.message,'error');
+   }
+  }
  }catch(e){status('ยังสร้างไฟล์ไม่ได้: '+e.message,'error');log('ERROR '+e.message);console.error(e)}
  finally{busy=false;$('generateBtn').disabled=false}
 }
+function cloudSnapshot(){
+ return {date:$('workDate').value,mode,files:files.map(e=>({file:e.file,role:e.role})),outputs:[...outputs],prepared};
+}
+async function addCloudFiles(entries,{replaceRole=false}={}){
+ if(!Array.isArray(entries))throw Error('รายการไฟล์จากคลาวด์ไม่ถูกต้อง');
+ for(const entry of entries){
+  if(!entry.file||!entry.role)continue;
+  if(replaceRole&&entry.role!=='truck')files=files.filter(x=>x.role!==entry.role);
+  if(files.some(x=>x.role===entry.role&&x.file.name===entry.file.name&&x.file.size===entry.file.size))continue;
+  files.push({id:++counter,file:entry.file,role:entry.role});
+ }
+ renderFiles();resetPreview();
+ status('โหลดไฟล์จากคลาวด์ '+entries.length+' รายการแล้ว ตรวจสอบประเภทไฟล์ได้เลยค่ะ','good');
+}
+async function restoreCloudRun({date,mode:nextMode,entries}){
+ files=[];outputs=[];showMode(nextMode);
+ $('workDate').value=date;
+ await addCloudFiles(entries,{replaceRole:false});
+}
+window.AliceOfficeUI={snapshot:cloudSnapshot,addCloudFiles,restoreCloudRun,log,status};
 function init(){
  const today=new Date();const iso=[today.getFullYear(),String(today.getMonth()+1).padStart(2,'0'),String(today.getDate()).padStart(2,'0')].join('-');$('workDate').value=iso;
  $('pickFiles').onclick=()=>$('files').click();$('pickFolder').onclick=()=>$('directory').click();
