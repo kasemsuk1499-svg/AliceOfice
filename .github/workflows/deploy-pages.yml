@@ -1,4 +1,4 @@
-name: Deploy Alice Office to GitHub Pages
+name: Validate Alice Office
 on:
   push:
     branches: [main]
@@ -6,33 +6,24 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: alice-office-pages
-  cancel-in-progress: true
 
 jobs:
-  deploy:
+  validate:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
-      - name: Prepare static site
+      - name: Check JavaScript syntax
         run: |
-          mkdir -p site/src
-          cp index.html site/index.html
-          cp src/*.js site/src/
-      - name: Configure Pages
-        uses: actions/configure-pages@v5
-      - name: Upload site
-        uses: actions/upload-pages-artifact@v4
-        with:
-          path: site
-      - name: Deploy website
-        id: deployment
-        uses: actions/deploy-pages@v4
+          node --check src/core.js
+          node --check src/app.js
+          node --check src/cloud.js
+          node --check src/cloud-config.js
+      - name: Verify website files
+        run: |
+          test -s index.html
+          test -s src/core.js
+          test -s src/app.js
+          test -s src/cloud.js
+          test -s src/cloud-config.js
+          test -s README.md
