@@ -328,7 +328,16 @@ async function createPrep(){
  if(!out.length)throw Error('ยังไม่มีแม่แบบ Excel STP/PTR ที่ใช้สร้างไฟล์ได้');
  return out;
 }
-function findExportSheet(wb){return wb.SheetNames.find(s=>/exporting report/i.test(s))||wb.SheetNames[0]}
+function findExportSheet(wb,iso){
+ const [yyyy,mm]=iso.split('-');
+ const mon=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][Number(mm)-1];
+ const matched=wb.SheetNames.filter(s=>new RegExp('Exporting\\s+Report\\s+'+mon+'\\w*\\s+'+yyyy,'i').test(s));
+ if(matched.length===1)return matched[0];
+ if(matched.length>1)throw Error('พบชีต Export เดือน '+mon+' '+yyyy+' ซ้ำ กรุณาตรวจไฟล์');
+ const fallback=wb.SheetNames.filter(s=>/exporting report/i.test(s));
+ if(fallback.length===1)return fallback[0];
+ throw Error('ไม่พบชีต Export เดือน '+mon+' '+yyyy+' (ไฟล์มี '+wb.SheetNames.length+' ชีต) กรุณาตรวจไฟล์ให้ตรงวัน');
+}
 function exportMap(kind){
  return kind==='STP'?{date:'C',contract:'E',booking:'F',agent:'G',etd:'H',receipt:'I',place:'J',product:'K',batch:'L',code:'M',bags:'N',kg:'O',tare:'P',gross:'Q',net:'R',carrier:'T',car:'W',registration:'X',driver:'Y',container:'Z',seal:'AA',weightCard:'AB'}:
  {date:'A',contract:'C',booking:'D',agent:'E',etd:'F',receipt:'G',place:'H',product:'I',batch:'J',code:'K',bags:'L',kg:'M',tare:'N',gross:'O',net:'P',carrier:'R',car:'U',registration:'V',driver:'W',container:'X',seal:'Y',weightCard:'Z'};
@@ -358,7 +367,7 @@ async function createDaily(){
   const loadPatch=await C().ExcelPatch.load(source.load),expPatch=await C().ExcelPatch.load(source.exp);
   const loadSheet=loadPatch.sheetByName(source.sheetName);
   if(!loadSheet)throw Error('ไม่พบชีต Loading '+source.sheetName);
-  const exportOriginal=await C().parseXlsx(source.exp),exportSheetName=findExportSheet(exportOriginal);
+  const exportOriginal=await C().parseXlsx(source.exp),exportSheetName=findExportSheet(exportOriginal,iso);
   const expSheet=expPatch.sheetByName(exportSheetName);
   if(!expSheet)throw Error('ไม่พบชีต Export '+exportSheetName);
   const rows=C().sheetRows(exportOriginal,exportSheetName),map=exportMap(kind);
