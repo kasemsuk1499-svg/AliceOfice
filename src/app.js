@@ -4,6 +4,141 @@ const C=()=>window.AliceCore;
 const $=id=>document.getElementById(id);
 const roles=[['planSTP','แผน STP 1 (CSV)'],['planPTR','แผน STP 2 / PTR (CSV)'],['formSTP','ใบแจ้งโหลด STP'],['formPTR','ใบแจ้งโหลด PTR'],['loadingSTP','Loading STP'],['loadingPTR','Loading PTR'],['loadingDomestic','Domestic / SSAMS Loading'],['planDomestic','แผนโหลด SSAMS (อ้างอิง)'],['exportSTP','Export STP'],['exportPTR','Export PTR'],['truck','ข้อมูลรถขนส่ง'],['ignore','ไม่ใช้งาน']];
 let mode='prep',files=[],counter=0,prepared=null,outputs=[],busy=false;
+
+const DAILY_EXTRA_GROUPS=[
+ {title:'เอกสารและค่าขนส่ง',fields:[
+  ['invoice','Invoice No.'],['contract','Contract No.'],['agent','Agent'],
+  ['etd','ETD / Destination'],['receipt','Place of Receipt'],['returnPlace','Place of Return'],
+  ['driver','Driver Name'],['contractorTeam','Contractor Team'],['price','Price (THB)','number'],
+  ['overnight','Overnight Charge']
+ ]},
+ {title:'เวลาและติดตามงาน',fields:[
+  ['arrive','Time Arrive','time'],['depart','Time Out','time'],
+  ['delayCause','Root Cause Delay'],['loadStart','Start Loading','time'],
+  ['loadEnd','Finish Loading','time'],['duration','Total Time','time','readonly']
+ ]},
+ {title:'ประเมินเอกสารและขนส่ง',fields:[
+  ['documentDelivery','การจัดส่งเอกสาร','number'],['documentAccuracy','ความถูกต้องเอกสาร','number'],
+  ['coordination','การประสานงาน','number'],['docTotal','Total Score เอกสาร','number','readonly'],
+  ['docPct','Total % เอกสาร','number','readonly'],
+  ['punctuality','ความตรงต่อเวลา','number'],['truckCondition','สภาพรถ','number'],
+  ['compliance','ปฏิบัติตามกฎ','number'],['driverCourtesy','มารยาทคนขับ','number'],
+  ['carrierTotal','Total Score ขนส่ง','number','readonly'],
+  ['carrierPct','Total % ขนส่ง','number','readonly'],
+  ['averageScore','Average Score','number','readonly'],
+  ['assessmentTotal','Total Assessment','number','readonly']
+ ]}
+];
+const DAILY_FIELDS=DAILY_EXTRA_GROUPS.flatMap(group=>group.fields);
+const DAILY_DEFAULTS={
+ receipt:'-',contractorTeam:'-',price:'-',overnight:'-',delayCause:'-',
+ loadStart:'10:00',loadEnd:'10:50',
+ documentDelivery:1,documentAccuracy:1,coordination:1,
+ punctuality:1,truckCondition:1,compliance:1,driverCourtesy:1
+};
+const DAILY_RATING_KEYS=new Set(['documentDelivery','documentAccuracy','coordination','punctuality','truckCondition','compliance','driverCourtesy']);
+function fixScore(value){return Math.round(Number(value||0)*10000)/10000}
+function timeMinutes(value){
+ const m=/^(\d{1,2}):(\d{2})$/.exec(String(value||''));if(!m)return null;
+ const h=Number(m[1]),minute=Number(m[2]);
+ return h<24&&minute<60?h*60+minute:null;
+}
+function asExcelTime(value){
+ const minutes=timeMinutes(value);return minutes===null?null:minutes/1440;
+}
+function fromExcelTime(value){
+ if(value===null||value===undefined||value==='')return '';
+ if(typeof value==='number'&&Number.isFinite(value)){
+  const minutes=Math.round((((value%1)+1)%1)*1440)%1440;
+  return String(Math.floor(minutes/60)).padStart(2,'0')+':'+String(minutes%60).padStart(2,'0');
+ }
+ if(typeof value==='string'&&/^\d{1,2}:\d{2}/.test(value))return value.slice(0,5);
+ return '';
+}
+function recalcDailyScores(extra){
+ const n=key=>Number(extra[key])||0;
+ extra.docTotal=fixScore(n('documentDelivery')+n('documentAccuracy')+n('coordination'));
+ extra.docPct=fixScore(extra.docTotal/3);
+ extra.carrierTotal=fixScore((n('punctuality')+n('truckCondition')+n('compliance')+n('driverCourtesy'))/4);
+ extra.carrierPct=extra.carrierTotal;
+ extra.averageScore=fixScore((extra.docPct+extra.carrierPct)/2);
+ extra.assessmentTotal=extra.averageScore;
+ const start=timeMinutes(extra.loadStart),end=timeMinutes(extra.loadEnd);
+ extra.duration=start===null||end===null?'':fromExcelTime(((end-start+1440)%1440)/1440);
+}
+function dailySupplementColumns(kind){
+ const cols=kind==='PTR'?
+  ['AA','AB','AC','AD','AE','AF','AG','AH','AI','AJ','AK','AL','AM','AN','AO','AP','AQ','AR','AS']:
+  ['AC','AD','AE','AF','AG','AH','AI','AJ','AK','AL','AM','AN','AO','AP','AQ','AR','AS','AT','AU'];
+ const keys=['arrive','depart','delayCause','loadStart','loadEnd','duration',
+  'documentDelivery','documentAccuracy','coordination','docTotal','docPct',
+  'punctuality','truckCondition','compliance','driverCourtesy','carrierTotal','carrierPct',
+  'averageScore','assessmentTotal'];
+ return Object.fromEntries(keys.map((key,i)=>[key,cols[i]]));
+}
+function initializeDailyExtra(v){
+ const extra={...DAILY_DEFAULTS,
+  invoice:v.invoice||'-',contract:v.contract||'-',agent:v.agent||'-',
+  etd:(v.etd&&v.destination)?v.etd+'/'+v.destination:(v.etd||'-'),
+  returnPlace:v.returnPlace||'-',driver:v.driver||'-'};
+ recalcDailyScores(extra);return extra;
+}
+function matchExistingReportRow(rows,kind,v,dateSerial,claimed){
+ const map=exportMap(kind),normal=x=>C().clean(x).toUpperCase().replace(/[^A-Z0-9]/g,'');
+ const list=[];
+ for(let r=7;r<=rows.length;r++){
+  if(claimed.has(r))continue;
+  const values=rows[r-1]||[];
+  if(Number(values[colIndex(map.date)])!==dateSerial)continue;
+  if(C().clean(values[colIndex(map.booking)])!==v.booking)continue;
+  list.push({row:r,values});
+ }
+ const byUnique=fn=>{const m=list.filter(fn);return m.length===1?m[0]:null};
+ let found=v.container&&normal(v.container)!=='-'?
+  byUnique(x=>normal(x.values[colIndex(map.container)])===normal(v.container)):null;
+ if(!found&&v.weightCard)found=byUnique(x=>normal(x.values[colIndex(map.weightCard)])===normal(v.weightCard));
+ if(!found&&v.registration)found=byUnique(x=>normal(x.values[colIndex(map.registration)])===normal(v.registration)&&
+  (v.kind!=='DOMESTIC'||normal(x.values[colIndex(map.place)])===normal(v.returnPlace)));
+ if(!found&&v.kind==='DOMESTIC'&&!v.registration&&!v.weightCard)
+  found=byUnique(x=>normal(x.values[colIndex(map.place)])===normal(v.returnPlace)&&
+   normal(x.values[colIndex(map.product)])===normal(v.product)&&Number(x.values[colIndex(map.bags)])===v.bags);
+ if(found)claimed.add(found.row);return found;
+}
+async function populateDailyExtras(iso,vehicles){
+ const serial=C().excelDate(iso);
+ for(const v of vehicles)v.extra=initializeDailyExtra(v);
+ for(const kind of ['STP','PTR']){
+  const subset=vehicles.filter(v=>v.exportKind===kind),file=sole('export'+kind);
+  if(!subset.length||!file)continue;
+  const wb=await C().parseXlsx(file),name=findExportSheet(wb,iso),rows=C().sheetRows(wb,name);
+  const map=exportMap(kind),extraMap=dailySupplementColumns(kind),claimed=new Set();
+  for(const v of subset){
+   const found=matchExistingReportRow(rows,kind,v,serial,claimed);
+   if(!found)continue;
+   v.existingExportRow=found.row;
+   for(const key of ['invoice','contract','agent','etd','receipt','driver']){
+    const cell=found.values[colIndex(map[key])];
+    if(cell!==null&&cell!==undefined&&String(cell).trim()!=='')v.extra[key]=String(cell);
+   }
+   const place=found.values[colIndex(map.place)];
+   if(place!==null&&place!==undefined&&String(place).trim()!=='')v.extra.returnPlace=String(place);
+   for(const key of ['contractorTeam','price','overnight']){
+    const col=key==='contractorTeam'?(kind==='PTR'?'Q':'S'):
+     key==='price'?(kind==='PTR'?'S':'U'):(kind==='PTR'?'T':'V');
+    const value=found.values[colIndex(col)];
+    if(value!==null&&value!==undefined&&String(value).trim()!=='')v.extra[key]=value;
+   }
+   for(const [key,col] of Object.entries(extraMap)){
+    const value=found.values[colIndex(col)];
+    if(value===null||value===undefined||String(value).trim()==='')continue;
+    v.extra[key]=['arrive','depart','loadStart','loadEnd','duration'].includes(key)?fromExcelTime(value):value;
+   }
+   // Recompute dependent display values only after explicit changes; existing
+   // report values are preserved until the user edits a score or time.
+  }
+ }
+}
+
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt=n=>Number(n||0).toLocaleString('th-TH');
 const extension=n=>(n.match(/\.([^.]+)$/)||[])[1]?.toLowerCase()||'';
@@ -254,33 +389,76 @@ async function analyzeDaily(iso,plans){
   if(dup.has(key))warnings.push('พบลำดับรถซ้ำ: '+key);
   dup.add(key);
  }
+ await populateDailyExtras(iso,all);
  return {mode:'daily',plans,filesByKind,cards:all,warnings,
   bookings:new Set(all.map(x=>x.kind+':'+x.booking)).size,units:all.length};
 }
 
+
+function dailyExtraPanel(v,i){
+ const title='<summary>✏️ กรอกข้อมูล Export เพิ่มเติม · '+esc(v.kind)+' คัน '+esc(v.carNo)+' — คลิกเพื่อเปิด/ปิด</summary>';
+ const groups=DAILY_EXTRA_GROUPS.map(group=>
+  '<section class="daily-extra-group"><h4>'+esc(group.title)+'</h4><div class="daily-extra-grid">'+
+  group.fields.map(([key,label,type,mode])=>{
+   const val=v.extra?.[key]??'';
+   const readonly=mode==='readonly';
+   const inputType=type==='time'?'time':type==='number'?'number':'text';
+   const attrs=type==='number'?' step="any"'+(DAILY_RATING_KEYS.has(key)?' min="0"':''):'';
+   const autoNote=(Object.hasOwn(DAILY_DEFAULTS,key)?' · ค่าเริ่มต้น':'');
+   return '<label class="daily-extra-field"><span>'+esc(label)+autoNote+'</span>'+
+    '<input class="daily-extra-input" data-i="'+i+'" data-key="'+key+'" type="'+inputType+'"'+attrs+
+    (readonly?' readonly tabindex="-1"':'')+' value="'+esc(val)+'" placeholder="'+(type==='time'?'--:--':'-')+'"></label>';
+  }).join('')+'</div></section>'
+ ).join('');
+ return '<tr class="daily-details-row"><td colspan="10"><details class="daily-details">'+title+
+  '<p class="daily-extra-help">ค่าเริ่มต้นอ้างอิงจากรายงานเก่าและแก้ไขได้ • เวลาเข้า/ออก และราคาให้กรอกตามจริง • ไม่ใช้ข้อมูลรถวันเก่ามาแทน</p>'+
+  groups+'</details></td></tr>';
+}
 function renderPreview(result){
  prepared=result;outputs=[];$('resultsCard').classList.add('hidden');$('previewCard').classList.remove('hidden');
- $('previewHint').textContent=result.mode==='prep'?'ข้อมูลที่ผ่านเงื่อนไข Load = KNS และไม่ Cancel — แก้จำนวนถุงได้หากแผนมีการเปลี่ยนแปลง':'ข้อมูลจาก Loading รายคัน — สามารถแก้ช่องรถและบัตรชั่งก่อนสร้าง Export ได้';
- const head=result.mode==='prep'?['สาย','Booking','สินค้า','คันที่','ถุง / คัน','วิธีโหลด','ตรวจสอบ']:['สาย','Booking','คัน','ทะเบียน','เลขตู้','Seal','Tare','Gross','Net','Weight Card'];
+ $('previewHint').textContent=result.mode==='prep'?'ข้อมูลที่ผ่านเงื่อนไข Load = KNS และไม่ Cancel — แก้จำนวนถุงได้หากแผนมีการเปลี่ยนแปลง':
+ 'ข้อมูลจาก Loading พร้อมช่องแก้ไขรถ และรายละเอียด Export เพิ่มเติมรายคัน (คลิกเปิดใต้รถ)';
+ const head=result.mode==='prep'?['สาย','Booking','สินค้า','คันที่','ถุง / คัน','วิธีโหลด','ตรวจสอบ']:
+ ['สาย','Booking','คัน','ทะเบียน','เลขตู้','Seal','Tare','Gross','Net','Weight Card'];
  $('previewHead').innerHTML='<tr>'+head.map(x=>'<th>'+x+'</th>').join('')+'</tr>';
  if(result.mode==='prep'){
   $('previewRows').innerHTML=result.cards.map((c,i)=>'<tr><td><span class="pill">'+c.kind+'</span></td><td><b>'+esc(c.job.booking)+'</b></td><td>'+esc(c.job.product)+'</td><td>'+c.no+'/'+c.job.fcl+'</td><td><input type="number" min="1" step="1" class="bagInput" data-i="'+i+'" value="'+esc(c.bags)+'" placeholder="ระบุจำนวน"></td><td><span class="pill '+(!c.bags?'pending':'ok')+'" id="method'+i+'">'+esc(c.category)+'</span></td><td>'+(!c.bags?'<span class="pill pending">ตรวจจำนวน</span>':c.job.confidence==='review'?'<span class="pill pending">ทบทวน</span>':'<span class="pill ok">พร้อม</span>')+'</td></tr>').join('');
   $('previewRows').querySelectorAll('.bagInput').forEach(el=>el.addEventListener('change',()=>{const i=Number(el.dataset.i),n=Number(el.value);result.cards[i].bags=Number.isInteger(n)&&n>0?n:null;result.cards[i].category=n===20?'Pallet':'แบก';$('method'+i).textContent=result.cards[i].category}));
  }else{
   const editable=['registration','container','seal','tare','gross','net','weightCard'];
-  $('previewRows').innerHTML=result.draftOnly?'<tr><td colspan="10" class="empty">⏳ รอข้อมูลรถเข้าจริง — แผน '+fmt(result.plannedUnits||0)+' ตู้ / รถที่ยืนยันใน Loading 0 คัน บันทึกงานฉบับร่างไว้บน Alice Cloud ได้ แล้วเพิ่มไฟล์ Loading และทะเบียนรถเมื่อมีข้อมูล</td></tr>':result.cards.map((v,i)=>'<tr><td><span class="pill">'+v.kind+'</span></td><td><b>'+esc(v.booking)+'</b></td><td>'+v.carNo+'</td>'+editable.map(key=>'<td><input data-i="'+i+'" data-key="'+key+'" value="'+esc(v[key]??'')+'" placeholder="'+(key==='weightCard'?'ยังไม่มี':'—')+'"></td>').join('')+'</tr>').join('');
-  $('previewRows').querySelectorAll('input').forEach(el=>el.addEventListener('change',()=>{const v=result.cards[Number(el.dataset.i)],key=el.dataset.key;v[key]=['tare','gross','net'].includes(key)?(Number(el.value)||null):el.value.trim()}));
+  $('previewRows').innerHTML=result.draftOnly?'<tr><td colspan="10" class="empty">⏳ รอข้อมูลรถเข้าจริง — แผน '+fmt(result.plannedUnits||0)+' ตู้ / รถที่ยืนยันใน Loading 0 คัน บันทึกงานฉบับร่างไว้บน Alice Cloud ได้ แล้วเพิ่มไฟล์ Loading และทะเบียนรถเมื่อมีข้อมูล</td></tr>':
+   result.cards.map((v,i)=>'<tr class="daily-vehicle-row"><td><span class="pill">'+esc(v.kind)+'</span></td><td><b>'+esc(v.booking)+'</b></td><td>'+v.carNo+'</td>'+
+    editable.map(key=>'<td><input class="daily-main-input" data-i="'+i+'" data-key="'+key+'" value="'+esc(v[key]??'')+'" placeholder="'+(key==='weightCard'?'ยังไม่มี':'—')+'"></td>').join('')+'</tr>'+
+    dailyExtraPanel(v,i)).join('');
+  $('previewRows').querySelectorAll('.daily-main-input').forEach(el=>el.addEventListener('change',()=>{
+   const v=result.cards[Number(el.dataset.i)],key=el.dataset.key;
+   v[key]=['tare','gross','net'].includes(key)?(Number(el.value)||null):el.value.trim();
+  }));
+  $('previewRows').querySelectorAll('.daily-extra-input:not([readonly])').forEach(el=>el.addEventListener('change',()=>{
+   const v=result.cards[Number(el.dataset.i)],key=el.dataset.key,value=el.value.trim();
+   v.extra[key]=DAILY_RATING_KEYS.has(key)?(value===''?0:Number(value)):value;
+   if(DAILY_RATING_KEYS.has(key)||key==='loadStart'||key==='loadEnd'){
+    recalcDailyScores(v.extra);
+    const panel=el.closest('.daily-details');
+    for(const key2 of ['docTotal','docPct','carrierTotal','carrierPct','averageScore','assessmentTotal','duration']){
+     const related=panel.querySelector('.daily-extra-input[data-key="'+key2+'"]');
+     if(related)related.value=v.extra[key2]??'';
+    }
+   }
+  }));
  }
  const warnings=[...result.warnings];
  $('warningsBox').classList.toggle('hidden',!warnings.length);
  $('warningsBox').innerHTML=warnings.length?'<b>รายการที่ต้องระวัง ('+warnings.length+')</b><div style="max-height:160px;overflow:auto">'+warnings.slice(0,24).map(w=>'<div>• '+esc(w)+'</div>').join('')+(warnings.length>24?'<div>… และอีก '+(warnings.length-24)+' รายการ</div>':'')+'</div>':'';
  $('generateBtn').disabled=!!result.draftOnly;
  $('generateBtn').textContent=result.draftOnly?'⌛ รอรถเข้าจริงก่อนสร้าง Excel':'⚡ สร้างไฟล์ Excel';
- $('generateHelp').textContent=result.draftOnly?'ขณะนี้เป็นฉบับร่าง — กด “บันทึกงานวันนี้” ใน Alice Cloud เพื่อเก็บไฟล์และแผนไว้ก่อน ไม่สร้างรายงานรถที่ยังไม่เข้าจริง':result.mode==='prep'?'ไฟล์ผลลัพธ์จะเป็น .xlsx ใหม่สำหรับดาวน์โหลด โดยไม่เปลี่ยนไฟล์ต้นทาง':'ระบบจะสร้าง Excel จากไฟล์ที่อัปโหลด ไม่เขียนทับไฟล์ต้นฉบับในเครื่อง';
+ $('generateHelp').textContent=result.draftOnly?'ขณะนี้เป็นฉบับร่าง — กด “บันทึกงานวันนี้” ใน Alice Cloud เพื่อเก็บไฟล์และแผนไว้ก่อน ไม่สร้างรายงานรถที่ยังไม่เข้าจริง':
+ result.mode==='prep'?'ไฟล์ผลลัพธ์จะเป็น .xlsx ใหม่สำหรับดาวน์โหลด โดยไม่เปลี่ยนไฟล์ต้นทาง':'ระบบจะสร้าง Excel จากไฟล์ที่อัปโหลด ไม่เขียนทับไฟล์ต้นฉบับในเครื่อง';
  stat(files.length,result.bookings,result.units,warnings.length);
  status(result.draftOnly?'อ่านไฟล์สำเร็จ — รอข้อมูลรถเข้าจริง (แผน '+fmt(result.plannedUnits)+' ตู้ / Loading 0 คัน) สามารถบันทึกงานฉบับร่างใน Alice Cloud ได้':'วิเคราะห์สำเร็จ '+result.units+' '+(result.mode==='prep'?'ตู้':'คัน')+' — ตรวจรายการก่อนกดสร้างไฟล์',result.draftOnly?'info':'good');
  $('previewCard').scrollIntoView({behavior:'smooth',block:'start'});
 }
+
 async function analyze(){
  if(busy)return;busy=true;$('analyzeBtn').disabled=true;resetPreview();
  try{
@@ -432,6 +610,7 @@ async function createDaily(){
   const expSheet=expPatch.sheetByName(exportSheetName);
   if(!expSheet)throw Error('ไม่พบชีต Export '+exportSheetName);
   const rows=C().sheetRows(original,exportSheetName),map=exportMap(kind);
+  const supplementMap=dailySupplementColumns(kind);
   const existing=[],claimed=new Set();
   let last=6,maxDailyNo=0;
   for(let r=7;r<=rows.length;r++){
@@ -496,12 +675,13 @@ async function createDaily(){
      U:v.weightCard,V:v.tare,W:v.gross,X:v.net};
     for(const [col,val] of Object.entries(updatedLoad))
      if(val!==null&&val!==undefined&&val!=='')await loadPatch.setCell(loadSheet,col+v.row,val);
-    const desired={date:dateSerial,invoice:v.invoice,contract:v.contract,booking:v.booking,
-     agent:v.agent,etd:(v.etd&&v.destination)?v.etd+'/'+v.destination:v.etd,
-     receipt:v.receipt,place:v.returnPlace,product:v.product,batch:v.batch,code:v.code,
-     bags:v.bags||null,kg:v.kg||null,tare:v.tare,gross:v.gross,net:v.net,
-     carrier:v.carrier,car:dayNo,registration:v.registration,driver:v.driver,
-     container:v.container,seal:v.seal,weightCard:v.weightCard};
+    const extra=v.extra||initializeDailyExtra(v);
+    const desired={date:dateSerial,invoice:extra.invoice,contract:extra.contract,booking:v.booking,
+     agent:extra.agent,etd:extra.etd,receipt:extra.receipt,place:extra.returnPlace,
+     product:v.product,batch:v.batch,code:v.code,bags:v.bags||null,kg:v.kg||null,
+     tare:v.tare,gross:v.gross,net:v.net,carrier:v.carrier,car:dayNo,
+     registration:v.registration,driver:extra.driver,container:v.container,seal:v.seal,
+     weightCard:v.weightCard};
     const oldValues=rows[row-1]||[];
     const alwaysSync=new Set(['invoice','contract','booking','agent','etd','receipt','place',
      'tare','gross','net','weightCard','registration','container','seal',
@@ -512,6 +692,27 @@ async function createDaily(){
      if(['net','gross','tare'].includes(field)&&!positive(val))continue;
      const old=oldValues[colIndex(col)],hasOld=old!==null&&old!==undefined&&String(old).trim()!=='';
      if(!target||!hasOld||alwaysSync.has(field))await expPatch.setCell(expSheet,col+row,val);
+    }
+    // Additional fields available in the Export workbook, not in Loading.
+    // Fixed historical values are exposed in the UI and may be overridden per vehicle.
+    for(const [key,col] of Object.entries({
+     contractorTeam:kind==='PTR'?'Q':'S',
+     price:kind==='PTR'?'S':'U',
+     overnight:kind==='PTR'?'T':'V',
+     ...supplementMap
+    })){
+     let value=extra[key];
+     if(value===null||value===undefined||String(value).trim()==='')continue;
+     if(['arrive','depart','loadStart','loadEnd','duration'].includes(key)){
+      value=asExcelTime(value);
+      if(value===null)throw Error('รูปแบบเวลาไม่ถูกต้อง: '+key+' คัน '+v.carNo+' (ใช้ HH:MM)');
+     }else if(['price','documentDelivery','documentAccuracy','coordination',
+      'docTotal','docPct','punctuality','truckCondition','compliance','driverCourtesy',
+      'carrierTotal','carrierPct','averageScore','assessmentTotal'].includes(key)&&value!=='-'){
+      value=Number(value);
+      if(!Number.isFinite(value))throw Error('ตัวเลขไม่ถูกต้อง: '+key+' คัน '+v.carNo);
+     }
+     await expPatch.setCell(expSheet,col+row,value);
     }
    }
    results.push(await loadPatch.save('AliceOffice_Loading_'+group+'_'+stamp(iso)+'.xlsx'));
