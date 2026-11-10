@@ -327,7 +327,7 @@ async function resolvePrepTemplates(plans){
 function createPages(jobs){
  const pages=[];
  for(const job of jobs){
-  for(let i=1;i<=job.fcl;i+=2){pages.push([{job,no:i},{job,no:i+1<=job.fcl?i+1:null}])}
+  for(let i=1;i<=job.fcl;i+=2){pages.push([{job,no:i},i+1<=job.fcl?{job,no:i+1}:null])}
  }
  return pages;
 }
