@@ -664,7 +664,7 @@ function getETD(job){
 }
 async function prepFile(kind,jobs,iso,template){
  const x=await C().ExcelPatch.load(template),pages=createPages(jobs),needed=pages.length;
- if(x.sheets.length>needed)throw Error('แม่แบบ '+kind+' มี '+x.sheets.length+' ชีต แต่ต้องใช้เพียง '+needed+' ชีต กรุณาใช้แม่แบบต้นฉบับที่มีชีตน้อยกว่าหรือเท่าจำนวนงาน เพื่อป้องกันหน้าเก่าค้าง');
+ if(x.sheets.length>needed){log('แม่แบบ '+kind+' มี '+x.sheets.length+' ชีต — ใช้ '+needed+' ชีตตามจำนวนคัน โดยไม่เปลี่ยนต้นฉบับ');await x.trimSheets(needed)}
  while(x.sheets.length<needed)await x.cloneSheet(x.sheets[x.sheets.length-1]);
  const names=new Map();
  for(let p=0;p<pages.length;p++){
