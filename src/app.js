@@ -75,6 +75,15 @@ async function readPlans(iso){
  }
  return result;
 }
+function missingPrepTemplates(plans){
+ return ['STP','PTR'].filter(kind=>(plans[kind]||[]).length&&!get('form'+kind).length);
+}
+async function resolvePrepTemplates(plans){
+ const needed=missingPrepTemplates(plans);
+ if(!needed.length||!window.AliceCloud?.isAuthenticated?.())return;
+ try{await window.AliceCloud.ensureTemplates(needed)}
+ catch(e){log('CLOUD ไม่สามารถโหลดแม่แบบอัตโนมัติ: '+e.message)}
+}
 function createPages(jobs){
  const pages=[];
  for(const job of jobs){
@@ -234,6 +243,7 @@ async function analyze(){
  try{
   const iso=validDate();
   const plan=await readPlans(iso);
+  if(mode==='prep')await resolvePrepTemplates(plan);
   const result=mode==='prep'?analyzePrep(plan):await analyzeDaily(iso,plan);
   renderPreview(result);log('วิเคราะห์สำเร็จ: '+result.bookings+' Booking / '+result.units+' คัน / แจ้งเตือน '+result.warnings.length);
  }catch(e){status(e.message,'error');log('ERROR '+e.message);console.error(e)}
@@ -314,13 +324,17 @@ async function prepFile(kind,jobs,iso,template){
 }
 async function createPrep(){
  const iso=validDate(),jobs=prepared.jobs;
+ await resolvePrepTemplates(prepared.plans);
+ const missing=missingPrepTemplates(prepared.plans);
+ if(missing.length)throw Error('ยังไม่มีแม่แบบใบแจ้งโหลด '+missing.join(' และ ')+' (.xlsx) กรุณาอัปโหลด Excel ต้นฉบับและเลือกประเภทไฟล์เป็นใบแจ้งโหลด STP/PTR หรือเข้าสู่ระบบ Supabase เพื่อใช้แม่แบบที่เคยบันทึกไว้');
  for(const j of jobs){j._cardBagValues=prepared.cards.filter(c=>c.job===j).map(c=>c.bags?Number(c.bags):null)}
  const out=[];
  for(const kind of ['STP','PTR']){
   const group=jobs.filter(j=>j.kind===kind);
   if(!group.length)continue;
   const template=sole('form'+kind);
-  if(!template){log('ข้าม '+kind+' ไม่มีแม่แบบ');continue}
+  if(!template)throw Error('ไม่พบแม่แบบ Excel '+kind+' กรุณาอัปโหลดแบบฟอร์มต้นฉบับ');
+  if(extension(template.name)!=='xlsx')throw Error('แม่แบบ '+kind+' ต้องเป็นไฟล์ .xlsx เท่านั้น');
   if(group.some(j=>j._cardBagValues.some(v=>!v)))throw Error('กรุณาระบุจำนวนถุงให้ครบทุกคันก่อนสร้าง '+kind);
   if(kind==='STP'&&group.some(j=>!j.packaging))throw Error('รายการ STP ไม่มี Packaging and Batch no. กรุณาตรวจ CSV');
   out.push(await prepFile(kind,group,iso,template));
@@ -473,7 +487,7 @@ async function generate(){
 function cloudSnapshot(){
  return {date:$('workDate').value,mode,files:files.map(e=>({file:e.file,role:e.role})),outputs:[...outputs],prepared};
 }
-async function addCloudFiles(entries,{replaceRole=false}={}){
+async function addCloudFiles(entries,{replaceRole=false,preservePreview=false}={}){
  if(!Array.isArray(entries))throw Error('รายการไฟล์จากคลาวด์ไม่ถูกต้อง');
  for(const entry of entries){
   if(!entry.file||!entry.role)continue;
@@ -481,7 +495,7 @@ async function addCloudFiles(entries,{replaceRole=false}={}){
   if(files.some(x=>x.role===entry.role&&x.file.name===entry.file.name&&x.file.size===entry.file.size))continue;
   files.push({id:++counter,file:entry.file,role:entry.role});
  }
- renderFiles();resetPreview();
+ renderFiles();if(!preservePreview)resetPreview();
  status('โหลดไฟล์จากคลาวด์ '+entries.length+' รายการแล้ว ตรวจสอบประเภทไฟล์ได้เลยค่ะ','good');
 }
 async function restoreCloudRun({date,mode:nextMode,entries}){
