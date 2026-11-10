@@ -3,7 +3,7 @@
 const $=id=>document.getElementById(id);
 const CONFIG=window.ALICE_OFFICE_CONFIG;
 const BUCKET=CONFIG?.bucket||'alice-office-private';
-const ROLES={formSTP:'แม่แบบใบแจ้ง STP',formPTR:'แม่แบบใบแจ้ง PTR',loadingSTP:'Loading STP ล่าสุด',loadingPTR:'Loading PTR ล่าสุด',exportSTP:'Export STP ล่าสุด',exportPTR:'Export PTR ล่าสุด',loadingDomestic:'Domestic / SSAMS ล่าสุด'};
+const ROLES={formSTP:'แม่แบบใบแจ้ง STP',formPTR:'แม่แบบใบแจ้ง PTR',loadingSTP:'Loading STP ล่าสุด',loadingPTR:'Loading PTR ล่าสุด',exportSTP:'Export STP ล่าสุด',exportPTR:'Export PTR ล่าสุด',loadingDomestic:'Domestic / SSAMS ล่าสุด',planBatch:'แผน Batch + Location / Qty Allocate ล่าสุด'};
 const esc=s=>String(s??'').replace(/[&<>"']/g,x=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[x]));
 const bytesToHex=array=>Array.from(new Uint8Array(array)).map(b=>b.toString(16).padStart(2,'0')).join('');
 const ext=name=>String(name||'').match(/\.([a-z0-9]+)$/i)?.[1]?.toLowerCase()||'bin';
