@@ -349,7 +349,54 @@ function analyzePrep(plans){
   }
  }
  const cards=jobs.flatMap(j=>Array.from({length:j.fcl},(_,i)=>({kind:j.kind,job:j,no:i+1,bags:j.bags||'',category:j.bags===20?'Pallet':'แบก'})));
- return {mode:'prep',jobs,plans,cards,warnings,planOnly:!cards.length,bookings:new Set(jobs.map(j=>j.kind+':'+j.booking)).size,units:cards.length};
+ // Keep warnings unrelated to bag counts; missing quantities are recalculated
+ // as the user types, rather than remaining frozen at the initial CSV reading.
+ const baseWarnings=warnings.filter(w=>!w.includes('ไม่ทราบจำนวนถุงต่อตู้'));
+ return {mode:'prep',jobs,plans,cards,warnings,baseWarnings,planOnly:!cards.length,bookings:new Set(jobs.map(j=>j.kind+':'+j.booking)).size,units:cards.length};
+}
+function updatePrepInputs(result,{fromDOM=true}={}){
+ if(!result||result.mode!=='prep')return [];
+ const inputs=[...$('previewRows').querySelectorAll('.bagInput')];
+ if(fromDOM)for(const el of inputs){
+  const i=Number(el.dataset.i),card=result.cards[i];
+  if(!card)continue;
+  const raw=el.value.trim(),n=Number(raw);
+  const valid=raw!==''&&Number.isSafeInteger(n)&&n>0;
+  card.bags=valid?n:null;
+  card.category=valid&&n===20?'Pallet':'แบก';
+  el.setAttribute('aria-invalid',String(!valid));
+ }
+ const missing=[];
+ const perJob=new Map();
+ for(let i=0;i<result.cards.length;i++){
+  const c=result.cards[i],valid=Number.isSafeInteger(c.bags)&&c.bags>0;
+  const method=$('method'+i),row=inputs[i]?.closest('tr'),state=row?.querySelector('.prep-review-state');
+  if(method){
+   method.textContent=c.category;
+   method.className='pill '+(!valid?'pending':c.bags===20?'ok':'');
+  }
+  if(state){
+   state.textContent=valid?'พร้อม':'ตรวจจำนวน';
+   state.className='pill '+(valid?'ok':'pending')+' prep-review-state';
+  }
+  if(!valid){
+   missing.push(i);
+   if(!perJob.has(c.job))perJob.set(c.job,[]);
+   perJob.get(c.job).push(c.no);
+  }
+ }
+ result.warnings=[...result.baseWarnings,...[...perJob].map(([job,carNos])=>
+  job.booking+' '+job.product+' ต้องระบุจำนวนถุงคันที่ '+carNos.join(', '))];
+ showPreviewWarnings(result);
+ return missing;
+}
+function showPreviewWarnings(result){
+ const warnings=[...result.warnings],box=$('warningsBox');
+ box.classList.toggle('hidden',!warnings.length);
+ box.innerHTML=warnings.length?'<b>รายการที่ต้องระวัง ('+warnings.length+')</b><div style="max-height:160px;overflow:auto">'+
+  warnings.slice(0,24).map(w=>'<div>• '+esc(w)+'</div>').join('')+
+  (warnings.length>24?'<div>… และอีก '+(warnings.length-24)+' รายการ</div>':'')+'</div>':'';
+ stat(files.length,result.bookings,result.units,warnings.length);
 }
 async function readManifest(file){
  const wb=await C().parseXlsx(file),found=[];
@@ -541,8 +588,15 @@ function renderPreview(result){
  ['สาย','Booking','คัน','ทะเบียน','เลขตู้','Seal','Tare','Gross','Net','Weight Card'];
  $('previewHead').innerHTML='<tr>'+head.map(x=>'<th>'+x+'</th>').join('')+'</tr>';
  if(result.mode==='prep'){
-  $('previewRows').innerHTML=result.cards.map((c,i)=>'<tr><td><span class="pill">'+c.kind+'</span></td><td><b>'+esc(c.job.booking)+'</b></td><td>'+esc(c.job.product)+'</td><td>'+c.no+'/'+c.job.fcl+'</td><td><input type="number" min="1" step="1" class="bagInput" data-i="'+i+'" value="'+esc(c.bags)+'" placeholder="ระบุจำนวน"></td><td><span class="pill '+(!c.bags?'pending':'ok')+'" id="method'+i+'">'+esc(c.category)+'</span></td><td>'+(!c.bags?'<span class="pill pending">ตรวจจำนวน</span>':c.job.confidence==='review'?'<span class="pill pending">ทบทวน</span>':'<span class="pill ok">พร้อม</span>')+'</td></tr>').join('');
-  $('previewRows').querySelectorAll('.bagInput').forEach(el=>el.addEventListener('change',()=>{const i=Number(el.dataset.i),n=Number(el.value);result.cards[i].bags=Number.isInteger(n)&&n>0?n:null;result.cards[i].category=n===20?'Pallet':'แบก';$('method'+i).textContent=result.cards[i].category}));
+  $('previewRows').innerHTML=result.cards.map((c,i)=>'<tr><td><span class="pill">'+c.kind+'</span></td><td><b>'+esc(c.job.booking)+'</b></td><td>'+esc(c.job.product)+'</td><td>'+c.no+'/'+c.job.fcl+'</td><td><input type="number" min="1" step="1" inputmode="numeric" class="bagInput" data-i="'+i+'" value="'+esc(c.bags)+'" placeholder="ระบุจำนวน" aria-label="จำนวนถุง '+esc(c.job.booking)+' คัน '+c.no+'"></td><td><span class="pill '+(!c.bags?'pending':c.bags===20?'ok':'')+'" id="method'+i+'">'+esc(c.category)+'</span></td><td><span class="pill '+(!c.bags?'pending':'ok')+' prep-review-state">'+(!c.bags?'ตรวจจำนวน':'พร้อม')+'</span></td></tr>').join('');
+  // "input" updates the review immediately, including pasted values.
+  // "change" handles browser controls that commit only after losing focus.
+  // Generate always reads the current DOM values again (autofill/scripts
+  // may alter .value without firing either event).
+  for(const el of $('previewRows').querySelectorAll('.bagInput')){
+   el.addEventListener('input',()=>updatePrepInputs(result));
+   el.addEventListener('change',()=>updatePrepInputs(result));
+  }
  }else{
   const editable=['registration','container','seal','tare','gross','net','weightCard'];
   $('previewRows').innerHTML=result.draftOnly?'<tr><td colspan="10" class="empty">⏳ รอข้อมูลรถเข้าจริง — แผน '+fmt(result.plannedUnits||0)+' ตู้ / รถที่ยืนยันใน Loading 0 คัน บันทึกงานฉบับร่างไว้บน Alice Cloud ได้ แล้วเพิ่มไฟล์ Loading และทะเบียนรถเมื่อมีข้อมูล</td></tr>':
@@ -566,14 +620,12 @@ function renderPreview(result){
    }
   }));
  }
- const warnings=[...result.warnings];
- $('warningsBox').classList.toggle('hidden',!warnings.length);
- $('warningsBox').innerHTML=warnings.length?'<b>รายการที่ต้องระวัง ('+warnings.length+')</b><div style="max-height:160px;overflow:auto">'+warnings.slice(0,24).map(w=>'<div>• '+esc(w)+'</div>').join('')+(warnings.length>24?'<div>… และอีก '+(warnings.length-24)+' รายการ</div>':'')+'</div>':'';
+ if(result.mode==='prep')updatePrepInputs(result);
+ else showPreviewWarnings(result);
  $('generateBtn').disabled=!!result.draftOnly||!!result.planOnly;
  $('generateBtn').textContent=result.planOnly?'📋 แสดงรายละเอียดแบช (ยังไม่มีใบแจ้งโหลดให้สร้าง)':result.draftOnly?'⌛ รอรถเข้าจริงก่อนสร้าง Excel':'⚡ สร้างไฟล์ Excel';
  $('generateHelp').textContent=result.draftOnly?'ขณะนี้เป็นฉบับร่าง — กด “บันทึกงานวันนี้” ใน Alice Cloud เพื่อเก็บไฟล์และแผนไว้ก่อน ไม่สร้างรายงานรถที่ยังไม่เข้าจริง':
  result.mode==='prep'?'ไฟล์ผลลัพธ์จะเป็น .xlsx ใหม่สำหรับดาวน์โหลด โดยไม่เปลี่ยนไฟล์ต้นทาง':'ระบบจะสร้าง Excel จากไฟล์ที่อัปโหลด ไม่เขียนทับไฟล์ต้นฉบับในเครื่อง';
- stat(files.length,result.bookings,result.units,warnings.length);
  status(result.planOnly?'อ่านแผนแบชสำเร็จ — ตรวจรายละเอียดตำแหน่งสินค้าและ Qty Allocate ในตารางด้านบน':result.draftOnly?'อ่านไฟล์สำเร็จ — รอข้อมูลรถเข้าจริง (แผน '+fmt(result.plannedUnits)+' ตู้ / Loading 0 คัน) สามารถบันทึกงานฉบับร่างใน Alice Cloud ได้':'วิเคราะห์สำเร็จ '+result.units+' '+(result.mode==='prep'?'ตู้':'คัน')+' — ตรวจรายการก่อนกดสร้างไฟล์',result.draftOnly?'info':'good');
  $('previewCard').scrollIntoView({behavior:'smooth',block:'start'});
 }
@@ -668,6 +720,17 @@ async function prepFile(kind,jobs,iso,template){
 }
 async function createPrep(){
  const iso=validDate(),jobs=prepared.jobs;
+ // Read displayed input values immediately before generating, not just the
+ // change-event state. This prevents falsely rejecting filled-in quantities.
+ const missing=updatePrepInputs(prepared);
+ if(missing.length){
+  const idx=missing[0],card=prepared.cards[idx];
+  const el=$('previewRows').querySelector('.bagInput[data-i="'+idx+'"]');
+  el?.focus();
+  el?.scrollIntoView({behavior:'smooth',block:'center'});
+  throw Error('กรุณาระบุจำนวนถุงให้ครบ: '+card.job.booking+' '+card.job.product+
+    ' คัน '+card.no+'/'+card.job.fcl+' (ยังขาด '+missing.length+' คัน)');
+ }
  await resolvePrepTemplates(prepared.plans);
  const missing=missingPrepTemplates(prepared.plans);
  if(missing.length)throw Error('ยังไม่มีแม่แบบใบแจ้งโหลด '+missing.join(' และ ')+' (.xlsx) กรุณาอัปโหลด Excel ต้นฉบับและเลือกประเภทไฟล์เป็นใบแจ้งโหลด STP/PTR หรือเข้าสู่ระบบ Supabase เพื่อใช้แม่แบบที่เคยบันทึกไว้');
