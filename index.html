@@ -85,17 +85,17 @@
 </div>
 <section class="statgrid" aria-label="สรุปข้อมูล"><div class="stat"><div class="k">ไฟล์ที่นำเข้า</div><div class="v" id="statFiles">0</div><div class="foot">ไฟล์ทั้งหมด</div></div><div class="stat"><div class="k">Booking</div><div class="v" id="statBookings">—</div><div class="foot">เฉพาะงานที่ผ่านการกรอง</div></div><div class="stat"><div class="k" id="statUnitLabel">จำนวนตู้</div><div class="v" id="statUnits">—</div><div class="foot">รายการที่จะจัดทำ</div></div><div class="stat"><div class="k">รายการต้องตรวจ</div><div class="v" id="statWarnings">—</div><div class="foot">ก่อนสร้างเอกสาร</div></div></section>
 <section class="card report hidden" id="batchPlanCard">
- <div class="cardhead"><div><h2>📦 รายละเอียดแผนแบชและตำแหน่งจัดเก็บ</h2><p class="sub" id="batchSummary">ตรวจสอบสินค้า แบช และ Qty Allocate ก่อนโหลด</p></div><span class="stepbadge">BATCH PLAN</span></div>
+ <div class="cardhead"><div><h2>📦 รายละเอียดแผนแบชและจำนวนจัดสรร</h2><p class="sub" id="batchSummary">ตรวจสอบสินค้า แบช และ Qty Allocate ก่อนโหลด</p></div><span class="stepbadge">BATCH PLAN</span></div>
  <div class="cardbody">
   <p class="hint">ข้อมูลจากไฟล์ Rev แยกตามชีตสินค้า • รูปแบบ <b>1(6) 2(12)</b> หมายถึงคัน/ตู้ที่ 1 จำนวน 6 หน่วย และคัน/ตู้ที่ 2 จำนวน 12 หน่วยตาม UOM • <b>Sheet1</b> เป็นข้อมูลสต็อกอ้างอิง ไม่ใช่ยอดโหลด</p>
   <div class="batch-controls">
    <label>เลือกชีตสินค้า<select id="batchSheetFilter" aria-label="เลือกชีตสินค้า"></select></label>
    <label>กรองคัน/ตู้<select id="batchCarFilter" aria-label="กรองคันหรือตู้"></select></label>
-   <label>ค้นหาแบช / โลเคชัน / สินค้า<input id="batchSearch" type="search" placeholder="กรอกรหัสแบช หรือ Location"></label>
+   <label>ค้นหาแบช / Code / สินค้า<input id="batchSearch" type="search" placeholder="กรอกรหัส Batch, Code หรือสินค้า"></label>
   </div>
   <p id="batchCount" class="hint"></p>
   <div class="table-scroll"><table class="data-table batch-table">
-   <thead><tr><th>Location</th><th>สินค้า</th><th>Batch</th><th>Code</th><th>Qty สต็อก</th><th>UOM</th><th>สถานะ</th><th>Qty Allocate ตามคัน</th></tr></thead>
+   <thead><tr><th>สินค้า</th><th>Batch</th><th>Code</th><th>Qty สต็อก</th><th>UOM</th><th>สถานะ</th><th>Qty Allocate ตามคัน</th></tr></thead>
    <tbody id="batchRows"></tbody>
   </table></div>
   <p id="batchNotes" class="hint"></p>
