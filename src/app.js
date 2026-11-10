@@ -391,11 +391,21 @@ function updatePrepInputs(result,{fromDOM=true}={}){
  return missing;
 }
 function showPreviewWarnings(result){
- const warnings=[...result.warnings],box=$('warningsBox');
- box.classList.toggle('hidden',!warnings.length);
+ const warnings=[...result.warnings],box=$('warningsBox'),isPrep=result.mode==='prep'&&result.cards.length>0;
+ // Keep the action bar in place as an input loses focus. Otherwise the
+ // warning collapses between pointer-down and click, moving "Generate Excel"
+ // away from the pointer before its click event fires.
+ if(isPrep){
+  const previousHeight=box.getBoundingClientRect().height;
+  if(previousHeight>0)box.style.minHeight=Math.ceil(previousHeight)+'px';
+  else if(!box.style.minHeight)box.style.minHeight='64px';
+ }
+ box.classList.toggle('hidden',!warnings.length&&!isPrep);
+ box.classList.toggle('warning',!!warnings.length);
  box.innerHTML=warnings.length?'<b>รายการที่ต้องระวัง ('+warnings.length+')</b><div style="max-height:160px;overflow:auto">'+
   warnings.slice(0,24).map(w=>'<div>• '+esc(w)+'</div>').join('')+
-  (warnings.length>24?'<div>… และอีก '+(warnings.length-24)+' รายการ</div>':'')+'</div>':'';
+  (warnings.length>24?'<div>… และอีก '+(warnings.length-24)+' รายการ</div>':'')+'</div>':
+  isPrep?'<b>✓ จำนวนถุงครบทุกคัน — พร้อมสร้างไฟล์ Excel</b>':'';
  stat(files.length,result.bookings,result.units,warnings.length);
 }
 async function readManifest(file){
@@ -582,6 +592,7 @@ function dailyExtraPanel(v,i){
 }
 function renderPreview(result){
  prepared=result;outputs=[];$('resultsCard').classList.add('hidden');$('previewCard').classList.remove('hidden');
+ $('warningsBox').style.minHeight='';
  $('previewHint').textContent=result.mode==='prep'?'ข้อมูลที่ผ่านเงื่อนไข Load = KNS และไม่ Cancel — แก้จำนวนถุงได้หากแผนมีการเปลี่ยนแปลง':
  'ข้อมูลจาก Loading พร้อมช่องแก้ไขรถ และรายละเอียด Export เพิ่มเติมรายคัน (คลิกเปิดใต้รถ)';
  const head=result.mode==='prep'?['สาย','Booking','สินค้า','คันที่','ถุง / คัน','วิธีโหลด','ตรวจสอบ']:
