@@ -276,13 +276,11 @@ function chooseLoadingSheet(wb,iso){
 function extractLoading(wb,kind,iso,plan,manifests,{domestic=false}={}){
  const sheetName=chooseLoadingSheet(wb,iso),rows=C().sheetRows(wb,sheetName);
  const vehicles=[],sourceRole=domestic?'loadingDomestic':'loading'+kind;
- let context={contract:'',booking:domestic?'-':'',agent:'',etd:'',destination:'',returnPlace:''},current=null;
+ let context={contract:'',booking:domestic?'-':'',agent:'',etd:'',destination:'',returnPlace:'',invoice:''},current=null,pageVehicles=[];
  const planMap=new Map(plan.map(j=>[j.booking,j]));
  function validBooking(book){return /^[A-Z0-9][A-Z0-9/-]{5,}$/i.test(book)&&/\d/.test(book)&&!/^(quantity|booking|date)/i.test(book)}
- const fileDetail=label=>{const row=rows.find(r=>C().clean(r[0]).toLowerCase().includes(label));return row?C().clean(row[1]):''};
- const invoice=fileDetail('invoice no'),place=fileDetail('place of delivery');
- function pushItem(row){
-  const product=C().clean(row[12]||row[1]),batch=C().clean(row[14]),code=C().clean(row[15]);
+ function pushItem(row,carLine=false){
+  const product=C().clean(row[12]||(carLine?row[1]:'')),batch=C().clean(row[14]),code=C().clean(row[15]);
   const packing=C().clean(row[13]),mfg=C().clean(row[16]),expiry=C().clean(row[17]);
   const contract=C().clean(row[0]);
   const bags=Number(row[18])||0,kg=Number(row[19])||0;
@@ -291,12 +289,26 @@ function extractLoading(wb,kind,iso,plan,manifests,{domestic=false}={}){
  for(let k=0;k<rows.length;k++){
   const row=rows[k],no=Number(row[7]),book=C().clean(row[3]);
   const bookingPresent=validBooking(book),header=C().clean(row[7]).toLowerCase()==='no.';
-  if(bookingPresent){
-   context={...context,booking:book,contract:C().clean(row[0])||context.contract,agent:C().clean(row[4])||context.agent,etd:C().clean(row[5])||context.etd,destination:'',returnPlace:''};
+  if(header){
+   current=null;pageVehicles=[];
+   context={contract:'',booking:domestic?'-':'',agent:'',etd:'',destination:'',returnPlace:'',invoice:''};
+   continue;
   }
-  if(header){current=null;continue}
-  // Footer labels terminate the vehicle detail block; never count SUM totals as a product line.
-  if(/invoice\s*no|place of delivery|loading at factory date|detail printing|^remark\b/i.test(C().clean(row[0]))){current=null;continue}
+  // Invoice / delivery labels can share the same row as a vehicle's cargo.
+  // Apply these document values to every vehicle on the current printed page.
+  const label=C().clean(row[0]).toLowerCase();
+  if(label.includes('invoice no')){
+   context.invoice=C().clean(row[1]);
+   for(const vehicle of pageVehicles)vehicle.invoice=context.invoice;
+  }
+  if(label.includes('place of delivery')){
+   context.returnPlace=C().clean(row[1]);
+   for(const vehicle of pageVehicles)vehicle.returnPlace=context.returnPlace;
+  }
+  if(bookingPresent){
+   context={...context,booking:book,contract:C().clean(row[0])||context.contract,
+    agent:C().clean(row[4])||context.agent,etd:C().clean(row[5])||context.etd,destination:''};
+  }
   const isCar=Number.isInteger(no)&&no>=1&&no<=200&&C().clean(row[7])!=='';
   if(isCar){
    if(!context.booking)continue;
@@ -304,23 +316,25 @@ function extractLoading(wb,kind,iso,plan,manifests,{domestic=false}={}){
    // Some loading sheets repeat a car number on each product line rather than merging the cell.
    const sameCar=current&&current.carNo===no&&current.registration===registration&&current.weightCard===weightCard&&
     (registration||weightCard)&&current.sourceRole===sourceRole;
-   if(sameCar){pushItem(row);continue}
+   if(sameCar){pushItem(row,true);continue}
    const planJob=planMap.get(context.booking);
    current={kind:domestic?'DOMESTIC':kind,exportKind:kind,sourceRole,sheetName,row:k+1,carNo:no,
-    booking:context.booking,contract:context.contract||planJob?.contract||'',invoice,
+    booking:context.booking,contract:context.contract||planJob?.contract||'',invoice:context.invoice,
     agent:context.agent||planJob?.agent||'',etd:planJob?.etd||context.etd,
-    destination:planJob?.destination||context.destination,returnPlace:place||planJob?.place||context.returnPlace,
+    destination:planJob?.destination||context.destination,returnPlace:context.returnPlace||planJob?.place||'',
     receipt:'',carrier:C().clean(row[8]),registration,container:C().clean(row[10]),
     seal:C().clean(row[11]),weightCard,tare:Number(row[21])||null,gross:Number(row[22])||null,
     net:Number(row[23])||null,driver:'',items:[],sourceName:sheetName,hasManifest:false};
-   vehicles.push(current);pushItem(row);
+   vehicles.push(current);pageVehicles.push(current);pushItem(row,true);
   }else if(current){
    if(bookingPresent&&book!==current.booking){current=null;continue}
    const f=C().clean(row[5]);
    if(!domestic&&/^[A-Z][A-Z -]{2,32}$/.test(f)&&!/ETD|FCL|CONTRACT/i.test(f)){
     context.destination=f;current.destination ||= f;
    }
-   if(C().clean(row[12])||C().clean(row[14])||C().clean(row[15])||Number(row[18])||Number(row[19]))pushItem(row);
+   // Totals at the bottom contain bag/kg numbers but no product/batch/code.
+   // Skip those without losing cargo on rows also labeled invoice/delivery.
+   if(C().clean(row[12])||C().clean(row[14])||C().clean(row[15])||C().clean(row[13]))pushItem(row);
   }
  }
  for(const v of vehicles){
