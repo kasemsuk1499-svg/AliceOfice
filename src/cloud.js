@@ -119,6 +119,28 @@ async function restoreTemplate(record){
   note('โหลดแม่แบบ '+record.role);
  }catch(e){feedback(e.message,false)}
 }
+async function ensureTemplates(kinds){
+ if(!signedIn()||!Array.isArray(kinds)||!kinds.length)return [];
+ const required=[...new Set(kinds.filter(k=>k==='STP'||k==='PTR').map(k=>'form'+k))];
+ if(!required.length)return [];
+ const {data,error}=await db.from('alice_office_files')
+  .select('role,filename,object_path,created_at')
+  .eq('owner_id',account().id).eq('category','template')
+  .in('role',required).order('created_at',{ascending:false}).limit(100);
+ if(error)throw Error('ค้นหาแม่แบบ Excel ในคลาวด์ไม่สำเร็จ: '+error.message);
+ const entries=[],seen=new Set();
+ for(const record of data||[]){
+  if(seen.has(record.role))continue;
+  seen.add(record.role);
+  entries.push({role:record.role,file:await loadObject(record)});
+ }
+ if(entries.length){
+  await window.AliceOfficeUI.addCloudFiles(entries,{replaceRole:false,preservePreview:true});
+  feedback('ใช้แม่แบบ Excel จากคลาวด์อัตโนมัติ '+entries.map(x=>x.role.replace('form','')).join(', '),true);
+  note('เรียกแม่แบบอัตโนมัติ '+entries.map(x=>x.role).join(', '));
+ }
+ return entries.map(x=>x.role.replace('form',''));
+}
 async function restoreRun(date,workflow){
  const u=account();
  if(!window.confirm('โหลดงาน '+date+' ('+workflow+') จากคลาวด์? ไฟล์ที่เลือกอยู่ในหน้านี้จะถูกแทนที่'))return;
@@ -211,6 +233,6 @@ async function init(){
  try{const {data,error}=await db.auth.getUser();if(error&&/invalid|refresh/i.test(error.message))note('Session expired');await setUser(data?.user||null)}
  catch(e){feedback('Supabase เชื่อมต่อขัดข้อง: '+e.message,false)}
 }
-window.AliceCloud={isAuthenticated:signedIn,saveRun,saveTemplates,refresh};
+window.AliceCloud={isAuthenticated:signedIn,saveRun,saveTemplates,ensureTemplates,refresh};
 document.addEventListener('DOMContentLoaded',init);
 })();
