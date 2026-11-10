@@ -160,7 +160,7 @@ function renderFiles(){
  });
  stat(files.length,prepared?.bookings,prepared?.units,prepared?.warnings?.length);
 }
-function resetPreview(){prepared=null;outputs=[];$('previewCard').classList.add('hidden');$('resultsCard').classList.add('hidden');$('statBookings').textContent='—';$('statUnits').textContent='—';$('statWarnings').textContent='—'}
+function resetPreview(){prepared=null;outputs=[];$('batchPlanCard')?.classList.add('hidden');$('previewCard').classList.add('hidden');$('resultsCard').classList.add('hidden');$('statBookings').textContent='—';$('statUnits').textContent='—';$('statWarnings').textContent='—'}
 async function acceptFiles(list){
  if(busy)return;
  for(const f of Array.from(list||[])){
@@ -210,6 +210,111 @@ async function readPlans(iso){
  }
  return result;
 }
+
+function batchAllocations(raw){
+ const out=[],regex=/(\d{1,3})\s*\(\s*([\d,]+(?:\.\d+)?)\s*\)/g;
+ let m;while((m=regex.exec(String(raw||'')))){
+  const carNo=Number(m[1]),qty=Number(m[2].replace(/,/g,''));
+  if(carNo>=1&&carNo<=200&&qty>0)out.push({carNo,qty});
+ }
+ return out;
+}
+async function readBatchPlan(){
+ const file=sole('planBatch');if(!file)return null;
+ const wb=await C().parseXlsx(file),sections=[],warnings=[];
+ let allocationRows=0,inventoryRows=0;
+ for(const name of wb.SheetNames){
+  const data=C().sheetRows(wb,name);
+  const head=data.findIndex(r=>/^location$/i.test(C().clean(r[0]))&&/item\s*number/i.test(C().clean(r[1]))&&/qty\s*allocate/i.test(C().clean(r[3]))&&/^batch$/i.test(C().clean(r[6])));
+  if(head===-1){warnings.push('อ่านหัวตารางแบชของ '+name+' ไม่ได้');continue}
+  const isInventory=/^sheet1$/i.test(name),rows=[],notes=[],noted=new Set();
+  for(let i=head+1;i<data.length;i++){
+   const r=data[i],location=C().clean(r[0]),product=C().clean(r[1]),stock=Number(r[2]),
+    allocationText=C().clean(r[3]),uom=C().clean(r[4]),status=C().clean(r[5]),lot=C().clean(r[6]);
+   if(product&&lot&&Number.isFinite(stock)&&stock>=0){
+    const sep=lot.indexOf('_'),batch=sep>=0?lot.slice(0,sep):lot,code=sep>=0?lot.slice(sep+1):'';
+    const allocation=isInventory?[]:batchAllocations(allocationText);
+    const allocated=allocation.reduce((sum,x)=>sum+x.qty,0);
+    rows.push({sheet:name,row:i+1,location,product,stock,allocationText,uom,status,batch,code,allocation,allocated});
+    if(isInventory)inventoryRows++;else if(allocated)allocationRows++;
+    if(allocated>stock)warnings.push(name+' แถว '+(i+1)+' จัดสรร '+allocated+' เกินจำนวน '+stock+' '+uom);
+    if(allocated&&status&&!/^available$/i.test(status))warnings.push(name+' แถว '+(i+1)+' จัดสรรจากสถานะ '+status);
+   }else{
+    for(const v of [r[0],r[1],r[2],r[3]]){
+     const note=C().clean(v);if(note&&!noted.has(note)&&/โหลด|ตัดช็อต|รอโหลด|แจ้ง/i.test(note)){
+      notes.push(note);noted.add(note);
+     }
+    }
+   }
+  }
+  sections.push({name,isInventory,rows,notes,allocated:rows.reduce((sum,r)=>sum+r.allocated,0),
+    cars:[...new Set(rows.flatMap(r=>r.allocation.map(a=>a.carNo)))].sort((a,b)=>a-b)});
+ }
+ if(!sections.length)throw Error('ไฟล์แผนแบชไม่มีหัวตาราง Location / Qty Allocate / Batch ที่ถูกต้อง');
+ return {filename:file.name,sections,warnings,allocationRows,inventoryRows};
+}
+function compareBatchPlan(plan,vehicles){
+ const notes=[],checks=[],key=x=>C().clean(x).replace(/\s/g,'').toUpperCase();
+ const planned=plan.sections.filter(s=>!s.isInventory).flatMap(s=>s.rows);
+ for(const v of vehicles){
+  let used=0,totalPlan=0,totalLoaded=0;
+  for(const item of v.items||[]){
+   const batch=key(item.batch),code=key(item.code);
+   const matches=planned.filter(r=>
+    code&&key(r.code)===code&&(!batch||key(r.batch)===batch));
+   if(!matches.length)continue;
+   if(new Set(matches.map(x=>x.sheet)).size!==1)continue;
+   const plannedQty=matches.reduce((sum,r)=>sum+r.allocation.filter(x=>x.carNo===v.carNo).reduce((n,x)=>n+x.qty,0),0);
+   if(!plannedQty)continue;
+   totalPlan+=plannedQty;totalLoaded+=Number(item.bags)||0;used++;
+  }
+  if(used){
+   const ok=totalLoaded===totalPlan;
+   checks.push({kind:v.kind,booking:v.booking,carNo:v.carNo,planned:totalPlan,loaded:totalLoaded,ok});
+   if(!ok)notes.push(v.kind+' Booking '+v.booking+' คัน '+v.carNo+
+    ' แบชตรงกันแต่จำนวนในแผน '+totalPlan+' / Loading '+totalLoaded+' — ตรวจสอบก่อนใช้');
+  }
+ }
+ return {checks,notes};
+}
+function renderBatchPlan(plan,checks=[]){
+ const box=$('batchPlanCard');if(!box)return;
+ box.classList.toggle('hidden',!plan);if(!plan)return;
+ const sections=plan.sections,sel=$('batchSheetFilter'),car=$('batchCarFilter'),search=$('batchSearch');
+ $('batchSummary').textContent=plan.filename+' • '+plan.allocationRows+' แถวจัดสรร • '+
+  plan.inventoryRows+' แถวสต็อกอ้างอิง • '+sections.filter(s=>!s.isInventory).length+' กลุ่มสินค้า';
+ const selected=sel.value;
+ sel.innerHTML=sections.map(x=>'<option value="'+esc(x.name)+'">'+esc(x.name)+
+  (x.isInventory?' — สต็อกอ้างอิง':' — '+fmt(x.allocated)+' หน่วยจัดสรร')+'</option>').join('');
+ sel.value=sections.some(x=>x.name===selected)?selected:(sections.find(x=>!x.isInventory)||sections[0]).name;
+ const draw=(refreshCars=false)=>{
+  const section=sections.find(x=>x.name===sel.value),carChoice=refreshCars?'':car.value;
+  if(refreshCars||!car.options.length){
+   car.innerHTML='<option value="">ทุกคัน/ตู้</option>'+section.cars.map(n=>'<option value="'+n+'">คัน/ตู้ '+n+'</option>').join('');
+   car.value=section.cars.includes(Number(carChoice))?carChoice:'';
+  }
+  const n=Number(car.value),term=C().clean(search.value).toUpperCase();
+  const rows=section.rows.filter(r=>(!n||r.allocation.some(x=>x.carNo===n))&&
+   (!term||[r.location,r.product,r.batch,r.code,r.status,r.allocationText].join(' ').toUpperCase().includes(term)));
+  $('batchRows').innerHTML=rows.slice(0,120).map(r=>
+   '<tr><td>'+esc(r.location)+'</td><td>'+esc(r.product)+'</td><td>'+esc(r.batch)+'</td>'+
+   '<td>'+esc(r.code)+'</td><td>'+fmt(r.stock)+'</td><td>'+esc(r.uom)+'</td>'+
+   '<td>'+esc(r.status)+'</td><td><b>'+esc(n?r.allocation.filter(x=>x.carNo===n).map(x=>x.carNo+'('+x.qty+')').join(' '):r.allocationText)+'</b></td></tr>').join('');
+  $('batchCount').textContent=fmt(rows.length)+' รายการ'+(rows.length>120?' (แสดง 120 รายการแรก — ค้นหาเพื่อดูรายการอื่น)':'');
+  $('batchNotes').textContent=section.notes.length?'หมายเหตุ: '+section.notes.join(' • '):'';
+ };
+ sel.onchange=()=>draw(true);car.onchange=()=>draw();search.oninput=()=>draw();draw(true);
+ const mismatches=checks.filter(x=>!x.ok);
+ $('batchChecks').textContent=checks.length?
+  'เทียบ Batch + Code + คันกับ Loading ได้ '+checks.length+' คัน • ตรง '+(checks.length-mismatches.length)+
+  ' • ต่าง '+mismatches.length+' (ไม่แก้ข้อมูล Loading อัตโนมัติ)':
+  'ยังจับคู่แผนแบชกับ Loading ไม่ได้ — ดูแผนเป็นข้อมูลอ้างอิง ไม่ถือว่าสินค้าโหลดแล้ว';
+ const alerts=[...plan.warnings,...mismatches.map(x=>x.kind+' '+x.booking+' คัน '+x.carNo+
+  ' แผน '+x.planned+' / Loading '+x.loaded)];
+ $('batchAlerts').classList.toggle('hidden',!alerts.length);
+ $('batchAlerts').textContent=alerts.slice(0,15).join(' • ')+(alerts.length>15?' และอีก '+(alerts.length-15)+' รายการ':'');
+}
+
 function missingPrepTemplates(plans){
  return ['STP','PTR'].filter(kind=>(plans[kind]||[]).length&&!get('form'+kind).length);
 }
@@ -234,7 +339,7 @@ function sheetTitle(job,n){
 function parseRequiredCount(jobs){return jobs.reduce((sum,x)=>sum+x.fcl,0)}
 function analyzePrep(plans){
  const jobs=[...plans.STP,...plans.PTR],warnings=[];
- if(!jobs.length)throw Error('ไม่พบแผนงานตรงวันที่และเงื่อนไข KNS — กรุณาตรวจวันที่หรือประเภท CSV');
+ if(!jobs.length&&!get('planBatch').length)throw Error('ไม่พบแผนงานตรงวันที่และเงื่อนไข KNS — กรุณาตรวจวันที่หรือประเภท CSV');
  for(const kind of ['STP','PTR']){
   if(plans[kind].length&&!get(kind==='STP'?'formSTP':'formPTR').length)warnings.push('ยังไม่มีไฟล์แม่แบบใบแจ้งโหลด '+kind+' — จะยังสร้างไฟล์ฝั่งนี้ไม่ได้');
   for(const j of plans[kind]){
@@ -244,7 +349,7 @@ function analyzePrep(plans){
   }
  }
  const cards=jobs.flatMap(j=>Array.from({length:j.fcl},(_,i)=>({kind:j.kind,job:j,no:i+1,bags:j.bags||'',category:j.bags===20?'Pallet':'แบก'})));
- return {mode:'prep',jobs,plans,cards,warnings,bookings:new Set(jobs.map(j=>j.kind+':'+j.booking)).size,units:cards.length};
+ return {mode:'prep',jobs,plans,cards,warnings,planOnly:!cards.length,bookings:new Set(jobs.map(j=>j.kind+':'+j.booking)).size,units:cards.length};
 }
 async function readManifest(file){
  const wb=await C().parseXlsx(file),found=[];
@@ -464,8 +569,8 @@ function renderPreview(result){
  const warnings=[...result.warnings];
  $('warningsBox').classList.toggle('hidden',!warnings.length);
  $('warningsBox').innerHTML=warnings.length?'<b>รายการที่ต้องระวัง ('+warnings.length+')</b><div style="max-height:160px;overflow:auto">'+warnings.slice(0,24).map(w=>'<div>• '+esc(w)+'</div>').join('')+(warnings.length>24?'<div>… และอีก '+(warnings.length-24)+' รายการ</div>':'')+'</div>':'';
- $('generateBtn').disabled=!!result.draftOnly;
- $('generateBtn').textContent=result.draftOnly?'⌛ รอรถเข้าจริงก่อนสร้าง Excel':'⚡ สร้างไฟล์ Excel';
+ $('generateBtn').disabled=!!result.draftOnly||!!result.planOnly;
+ $('generateBtn').textContent=result.planOnly?'📋 แสดงรายละเอียดแบช (ยังไม่มีใบแจ้งโหลดให้สร้าง)':result.draftOnly?'⌛ รอรถเข้าจริงก่อนสร้าง Excel':'⚡ สร้างไฟล์ Excel';
  $('generateHelp').textContent=result.draftOnly?'ขณะนี้เป็นฉบับร่าง — กด “บันทึกงานวันนี้” ใน Alice Cloud เพื่อเก็บไฟล์และแผนไว้ก่อน ไม่สร้างรายงานรถที่ยังไม่เข้าจริง':
  result.mode==='prep'?'ไฟล์ผลลัพธ์จะเป็น .xlsx ใหม่สำหรับดาวน์โหลด โดยไม่เปลี่ยนไฟล์ต้นทาง':'ระบบจะสร้าง Excel จากไฟล์ที่อัปโหลด ไม่เขียนทับไฟล์ต้นฉบับในเครื่อง';
  stat(files.length,result.bookings,result.units,warnings.length);
@@ -479,8 +584,11 @@ async function analyze(){
   const iso=validDate();
   const plan=await readPlans(iso);
   if(mode==='prep')await resolvePrepTemplates(plan);
+  const batchPlan=await readBatchPlan();
   const result=mode==='prep'?analyzePrep(plan):await analyzeDaily(iso,plan);
-  renderPreview(result);log('วิเคราะห์สำเร็จ: '+result.bookings+' Booking / '+result.units+' คัน / แจ้งเตือน '+result.warnings.length);
+  result.batchPlan=batchPlan;
+  if(batchPlan&&result.mode==='daily'&&result.cards.length){const comparison=compareBatchPlan(batchPlan,result.cards);result.batchChecks=comparison.checks;result.warnings.push(...comparison.notes)}
+  renderPreview(result);renderBatchPlan(batchPlan,result.batchChecks||[]);log('วิเคราะห์สำเร็จ: '+result.bookings+' Booking / '+result.units+' คัน / แจ้งเตือน '+result.warnings.length);
  }catch(e){status(e.message,'error');log('ERROR '+e.message);console.error(e)}
  finally{busy=false;$('analyzeBtn').disabled=false}
 }
