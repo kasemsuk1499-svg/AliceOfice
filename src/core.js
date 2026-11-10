@@ -154,6 +154,42 @@ class ExcelPatch {
   if(this.sheets.some(s=>s!==sheet&&s.name.toLowerCase()===name.toLowerCase()))throw Error('ชื่อชีตซ้ำ: '+name);
   sheet.name=name;sheet.node.setAttribute('name',name);
  }
+ async trimSheets(keep){
+  if(!Number.isInteger(keep)||keep<1||keep>this.sheets.length)
+   throw Error('จำนวนชีตที่ต้องเก็บไม่ถูกต้อง: '+keep);
+  // Templates often have a fixed set of 10 blank form sheets. Keep only the
+  // pages required by today's cars in the OUTPUT; never edit the source file.
+  while(this.sheets.length>keep){
+   const sheet=this.sheets.pop();
+   sheet.node.remove();
+   const relation=l(this.bookRels.documentElement,'Relationship').find(r=>attr(r,'Id')===sheet.rid);
+   if(relation)relation.remove();
+   this.zip.remove(sheet.path);
+   this.docs.delete(sheet.path);
+   const relationships=relPath(sheet.path);
+   this.zip.remove(relationships);
+   this.docs.delete(relationships);
+   for(const override of l(this.contentTypes.documentElement,'Override')){
+    if(attr(override,'PartName')==='/'+sheet.path)override.remove();
+   }
+  }
+  // Defined names such as print areas use zero-based sheet indexes.
+  const names=one(this.book.documentElement,'definedNames');
+  if(names){
+   for(const node of l(names,'definedName')){
+    const idx=Number(attr(node,'localSheetId'));
+    if(node.hasAttribute('localSheetId')&&Number.isInteger(idx)&&idx>=keep)node.remove();
+   }
+   if(!l(names,'definedName').length)names.remove();
+  }
+  const views=one(this.book.documentElement,'bookViews');
+  if(views)for(const view of l(views,'workbookView')){
+   const selected=Number(attr(view,'activeTab'));
+   if(selected>=keep)view.setAttribute('activeTab','0');
+   const first=Number(attr(view,'firstSheet'));
+   if(first>=keep)view.setAttribute('firstSheet','0');
+  }
+ }
  async cloneSheet(source){
   const old=source.path;let nr=1;
   while(this.zip.file('xl/worksheets/sheet'+nr+'.xml'))nr++;
