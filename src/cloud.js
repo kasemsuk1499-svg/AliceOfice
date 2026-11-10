@@ -75,9 +75,9 @@ async function saveRun(state=getContext()){
  feedback('กำลังบันทึกงานและไฟล์ Excel เข้าคลังส่วนตัว...');
  const cardData=(state.prepared?.cards||[]).map(card=>{
   if(state.mode==='prep')return {flow:card.kind,booking:card.job.booking,car_no:card.no,product:card.job.product,bags:card.bags,method:card.category};
-  return {flow:card.kind,booking:card.booking,car_no:card.carNo,product:card.product,container:card.container,registration:card.registration,seal:card.seal,tare:card.tare,gross:card.gross,net:card.net,weightCard:card.weightCard};
+  return {flow:card.kind,booking:card.booking,car_no:card.carNo,product:card.product,container:card.container,registration:card.registration,seal:card.seal,tare:card.tare,gross:card.gross,net:card.net,weightCard:card.weightCard,extra:{...(card.extra||{})}};
  });
- const snapshot={version:1,bookings:state.prepared?.bookings||0,units:state.prepared?.units||0,warnings:state.prepared?.warnings?.length||0,cards:cardData};
+ const snapshot={version:2,bookings:state.prepared?.bookings||0,units:state.prepared?.units||0,warnings:state.prepared?.warnings?.length||0,cards:cardData};
  const draft={owner_id:u.id,work_date:state.date,workflow:state.mode,payload:snapshot,updated_at:new Date().toISOString()};
  const {error:draftError}=await db.from('alice_office_drafts').upsert(draft,{onConflict:'owner_id,work_date,workflow'});
  if(draftError)throw new Error('บันทึกงาน: '+draftError.message);
@@ -152,8 +152,11 @@ async function restoreRun(date,workflow){
   if(!data?.length)throw Error('ยังไม่มีไฟล์ต้นทางของงานนี้ในคลาวด์');
   const entries=[];
   for(const row of data)entries.push({role:row.role,file:await loadObject(row)});
-  await window.AliceOfficeUI.restoreCloudRun({date,mode:workflow,entries});
-  feedback('เรียกคืนงาน '+date+' สำเร็จ '+entries.length+' ไฟล์ กรุณาตรวจข้อมูลก่อนสร้างใหม่',true);
+  const {data:snapshots,error:snapshotError}=await db.from('alice_office_drafts')
+   .select('payload').eq('owner_id',u.id).eq('work_date',date).eq('workflow',workflow).limit(1);
+  if(snapshotError)throw Error('เรียกข้อมูลที่กรอกไว้ไม่สำเร็จ: '+snapshotError.message);
+  await window.AliceOfficeUI.restoreCloudRun({date,mode:workflow,entries,cardData:snapshots?.[0]?.payload?.cards||[]});
+  feedback('เรียกคืนงาน '+date+' สำเร็จ '+entries.length+' ไฟล์ รวมข้อมูลที่กรอกผ่านเว็บ',true);
   note('เรียกคืนงาน '+date+' '+entries.length+' ไฟล์');
  }catch(e){feedback(e.message,false)}
 }
