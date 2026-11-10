@@ -2,7 +2,7 @@
 'use strict';
 const C=()=>window.AliceCore;
 const $=id=>document.getElementById(id);
-const roles=[['planSTP','แผน STP 1 (CSV)'],['planPTR','แผน STP 2 / PTR (CSV)'],['formSTP','ใบแจ้งโหลด STP'],['formPTR','ใบแจ้งโหลด PTR'],['loadingSTP','Loading STP'],['loadingPTR','Loading PTR'],['exportSTP','Export STP'],['exportPTR','Export PTR'],['truck','ข้อมูลรถขนส่ง'],['ignore','ไม่ใช้งาน']];
+const roles=[['planSTP','แผน STP 1 (CSV)'],['planPTR','แผน STP 2 / PTR (CSV)'],['formSTP','ใบแจ้งโหลด STP'],['formPTR','ใบแจ้งโหลด PTR'],['loadingSTP','Loading STP'],['loadingPTR','Loading PTR'],['loadingDomestic','Domestic / SSAMS Loading'],['planDomestic','แผนโหลด SSAMS (อ้างอิง)'],['exportSTP','Export STP'],['exportPTR','Export PTR'],['truck','ข้อมูลรถขนส่ง'],['ignore','ไม่ใช้งาน']];
 let mode='prep',files=[],counter=0,prepared=null,outputs=[],busy=false;
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt=n=>Number(n||0).toLocaleString('th-TH');
@@ -56,11 +56,11 @@ function showMode(next){
  mode=next;resetPreview();
  $('tabPrep').classList.toggle('active',mode==='prep');$('tabDaily').classList.toggle('active',mode==='daily');
  $('uploadTitle').textContent=mode==='prep'?'1. นำเข้าไฟล์สำหรับเตรียมโหลด':'1. นำเข้า Loading / Export และไฟล์ขนส่ง';
- $('uploadDesc').textContent=mode==='prep'?'ใช้ CSV แผน STP1/STP2 และแบบใบแจ้งโหลด STP/PTR (.xlsx)':'ใช้ Loading และ Export Excel ของวันที่ทำงาน พร้อมไฟล์รถขนส่งและ CSV แผน (ถ้ามี) เพื่อซิงก์ข้อมูลแต่ละคัน';
+ $('uploadDesc').textContent=mode==='prep'?'ใช้ CSV แผน STP1/STP2 และแบบใบแจ้งโหลด STP/PTR (.xlsx)':'ใช้ Loading STP/PTR, Domestic/SSAMS, Export STP/PTR พร้อมไฟล์รถขนส่ง (ถ้ามี) — Loading ทุกประเภทที่ไม่ใช่ PTR ลง Export STP';
  $('rulesTitle').textContent=mode==='prep'?'กติกาเตรียมโหลด':'กติกา Daily Report';
  $('rulesPrep').classList.toggle('hidden',mode!=='prep');$('rulesDaily').classList.toggle('hidden',mode!=='daily');
  $('statUnitLabel').textContent=mode==='prep'?'จำนวนตู้':'จำนวนคัน';
- $('rulesNotice').innerHTML=mode==='prep'?'แม่แบบ STP/PTR ควรเป็น <b>ไฟล์ Excel เดิมที่มี Text Box</b> เพื่อรักษารูปแบบต้นฉบับ รวมทั้งหัวข้อ Gate No. ของ PTR':'ระบบจะซิงก์ข้อมูลจาก <b>Loading ไป Export</b> และเสริมเลขรถ/ตู้/Seal/Tare จากรายชื่อขนส่ง เมื่อจับคู่ Booking และลำดับรถได้แน่ชัด';
+ $('rulesNotice').innerHTML=mode==='prep'?'แม่แบบ STP/PTR ควรเป็น <b>ไฟล์ Excel เดิมที่มี Text Box</b> เพื่อรักษารูปแบบต้นฉบับ รวมทั้งหัวข้อ Gate No. ของ PTR':'ระบบจะนำข้อมูล <b>Loading ทุกส่วน</b> ที่มีช่องตรงกันลง Export: PTR → Export PTR; ส่วน STP และ Domestic/SSAMS → Export STP โดยไม่คัดลอกข้อมูลจากวันก่อน';
  status('เลือกไฟล์สำหรับ '+(mode==='prep'?'งานเตรียมโหลด':'Daily Report')+' แล้วกดตรวจสอบได้เลยค่ะ');
 }
 async function readPlans(iso){
@@ -138,22 +138,24 @@ function chooseLoadingSheet(wb,iso){
  if(found.length===1)return found[0];
  throw Error('ไม่พบชีตวันที่ '+wanted+' ใน Loading หรือมีหลายชีตที่ระบุไม่ชัดเจน');
 }
-function extractLoading(wb,kind,iso,plan,manifests){
+function extractLoading(wb,kind,iso,plan,manifests,{domestic=false}={}){
  const sheetName=chooseLoadingSheet(wb,iso),rows=C().sheetRows(wb,sheetName);
- const vehicles=[];
- let context={contract:'',booking:'',agent:'',etd:'',destination:'',returnPlace:''},current=null;
+ const vehicles=[],sourceRole=domestic?'loadingDomestic':'loading'+kind;
+ let context={contract:'',booking:domestic?'-':'',agent:'',etd:'',destination:'',returnPlace:''},current=null;
  const planMap=new Map(plan.map(j=>[j.booking,j]));
  function validBooking(book){return /^[A-Z0-9][A-Z0-9/-]{5,}$/i.test(book)&&/\d/.test(book)&&!/^(quantity|booking|date)/i.test(book)}
+ const fileDetail=label=>{const row=rows.find(r=>C().clean(r[0]).toLowerCase().includes(label));return row?C().clean(row[1]):''};
+ const invoice=fileDetail('invoice no'),place=fileDetail('place of delivery');
  function pushItem(row){
   const product=C().clean(row[12]||row[1]),batch=C().clean(row[14]),code=C().clean(row[15]);
+  const packing=C().clean(row[13]),mfg=C().clean(row[16]),expiry=C().clean(row[17]);
   const contract=C().clean(row[0]);
   const bags=Number(row[18])||0,kg=Number(row[19])||0;
-  if(product||batch||code||bags||kg)current.items.push({product,batch,code,bags,kg,contract:/^S?PTR?\d{4}|^TSP\d{4}/i.test(contract)?contract:''});
+  if(product||batch||code||bags||kg)current.items.push({product,batch,code,packing,mfg,expiry,bags,kg,contract:/^S?PTR?\d{4}|^TSP\d{4}/i.test(contract)?contract:''});
  }
  for(let k=0;k<rows.length;k++){
   const row=rows[k],no=Number(row[7]),book=C().clean(row[3]);
-  const bookingPresent=validBooking(book);
-  const header=C().clean(row[7]).toLowerCase()==='no.';
+  const bookingPresent=validBooking(book),header=C().clean(row[7]).toLowerCase()==='no.';
   if(bookingPresent){
    context={...context,booking:book,contract:C().clean(row[0])||context.contract,agent:C().clean(row[4])||context.agent,etd:C().clean(row[5])||context.etd,destination:'',returnPlace:''};
   }
@@ -161,15 +163,25 @@ function extractLoading(wb,kind,iso,plan,manifests){
   const isCar=Number.isInteger(no)&&no>=1&&no<=200&&C().clean(row[7])!=='';
   if(isCar){
    if(!context.booking)continue;
+   const registration=C().clean(row[9]),weightCard=C().clean(row[20]);
+   // Some loading sheets repeat a car number on each product line rather than merging the cell.
+   const sameCar=current&&current.carNo===no&&current.registration===registration&&current.weightCard===weightCard&&
+    (registration||weightCard)&&current.sourceRole===sourceRole;
+   if(sameCar){pushItem(row);continue}
    const planJob=planMap.get(context.booking);
-   current={kind,sheetName,row:k+1,carNo:no,booking:context.booking,contract:context.contract||planJob?.contract||'',agent:context.agent||planJob?.agent||'',etd:planJob?.etd||context.etd,destination:planJob?.destination||context.destination,returnPlace:planJob?.place||context.returnPlace,carrier:C().clean(row[8]),registration:C().clean(row[9]),container:C().clean(row[10]),seal:C().clean(row[11]),weightCard:C().clean(row[20]),tare:Number(row[21])||null,gross:Number(row[22])||null,net:Number(row[23])||null,driver:'',items:[],sourceName:sheetName,hasManifest:false};
+   current={kind:domestic?'DOMESTIC':kind,exportKind:kind,sourceRole,sheetName,row:k+1,carNo:no,
+    booking:context.booking,contract:context.contract||planJob?.contract||'',invoice,
+    agent:context.agent||planJob?.agent||'',etd:planJob?.etd||context.etd,
+    destination:planJob?.destination||context.destination,returnPlace:place||planJob?.place||context.returnPlace,
+    receipt:'',carrier:C().clean(row[8]),registration,container:C().clean(row[10]),
+    seal:C().clean(row[11]),weightCard,tare:Number(row[21])||null,gross:Number(row[22])||null,
+    net:Number(row[23])||null,driver:'',items:[],sourceName:sheetName,hasManifest:false};
    vehicles.push(current);pushItem(row);
   }else if(current){
    if(bookingPresent&&book!==current.booking){current=null;continue}
    const f=C().clean(row[5]);
-   if(/^[A-Z][A-Z -]{2,32}$/.test(f)&&!/ETD|FCL|CONTRACT/i.test(f)){
-    context.destination=f;
-    current.destination ||= f;
+   if(!domestic&&/^[A-Z][A-Z -]{2,32}$/.test(f)&&!/ETD|FCL|CONTRACT/i.test(f)){
+    context.destination=f;current.destination ||= f;
    }
    if(C().clean(row[12])||C().clean(row[14])||C().clean(row[15])||Number(row[18])||Number(row[19]))pushItem(row);
   }
@@ -178,51 +190,71 @@ function extractLoading(wb,kind,iso,plan,manifests){
   const truck=manifests.find(m=>m.booking===v.booking&&m.carNo===v.carNo&&(m.container===v.container||!v.container))||
               manifests.find(m=>m.booking===v.booking&&m.carNo===v.carNo);
   if(truck){
-   v.hasManifest=true;v.registration ||= truck.registration;v.container ||= truck.container;v.seal ||= truck.seal;v.tare ||= truck.tare;v.carrier ||= truck.carrier;v.driver ||= truck.driver;
+   v.hasManifest=true;v.registration ||= truck.registration;v.container ||= truck.container;
+   v.seal ||= truck.seal;v.tare ||= truck.tare;v.carrier ||= truck.carrier;v.driver ||= truck.driver;
   }
-  v.contract=Array.from(new Set([v.contract,...v.items.map(i=>i.contract)].filter(Boolean))).join(' / ');
-  v.product=Array.from(new Set(v.items.map(i=>i.product).filter(Boolean))).join(' / ');
-  v.batch=Array.from(new Set(v.items.map(i=>i.batch).filter(Boolean))).join(' / ');
+  const distinct=values=>Array.from(new Set(values.map(C().clean).filter(Boolean)));
+  v.contract=distinct([v.contract,...v.items.map(i=>i.contract)]).join(' / ');
+  v.product=distinct(v.items.map(i=>i.product)).join(' / ');
+  v.batch=distinct(v.items.map(i=>i.batch)).join(' / ');
   v.code=v.items.filter(i=>i.code).map(i=>i.code+(i.bags?'('+i.bags+'Bag)':'')).join(' / ');
+  v.packing=distinct(v.items.map(i=>i.packing)).join(' / ');
+  v.mfg=distinct(v.items.map(i=>i.mfg)).join(' / ');
+  v.expiry=distinct(v.items.map(i=>i.expiry)).join(' / ');
   v.bags=v.items.reduce((a,i)=>a+(i.bags||0),0);
   v.kg=v.items.reduce((a,i)=>a+(i.kg||0),0);
  }
  return {sheetName,vehicles};
 }
+
 async function analyzeDaily(iso,plans){
- const filesByKind={},all=[],warnings=[];
- const manifests=[];
- for(const en of get('truck'))try{const found=await readManifest(en.file);manifests.push(...found);log('ไฟล์ขนส่ง '+en.file.name+' พบ '+found.length+' คัน')}catch(e){warnings.push('ไฟล์ขนส่ง '+en.file.name+': '+e.message)}
- for(const kind of ['STP','PTR']){
-  const load=sole('loading'+kind),exp=sole('export'+kind);
-  if(!load&&!exp)continue;
-  if(!load||!exp){warnings.push('มีไฟล์ '+kind+' ไม่ครบคู่ Loading / Export');continue}
-  const wb=await C().parseXlsx(load);
-  const parsed=extractLoading(wb,kind,iso,plans[kind],manifests);
-  const allowed=plans[kind].length?new Set(plans[kind].map(j=>j.booking)):null;
+ const filesByKind={},all=[],warnings=[],manifests=[];
+ for(const en of get('truck'))try{
+  const found=await readManifest(en.file);manifests.push(...found);
+  log('ไฟล์ขนส่ง '+en.file.name+' พบ '+found.length+' คัน');
+ }catch(e){warnings.push('ไฟล์ขนส่ง '+en.file.name+': '+e.message)}
+ const sources=[
+  {role:'loadingSTP',kind:'STP',exportRole:'exportSTP'},
+  {role:'loadingDomestic',kind:'STP',exportRole:'exportSTP',domestic:true},
+  {role:'loadingPTR',kind:'PTR',exportRole:'exportPTR'}
+ ];
+ for(const source of sources){
+  const load=sole(source.role);if(!load)continue;
+  const exp=sole(source.exportRole);
+  if(!exp){warnings.push('มี '+source.role+' แต่ขาด '+source.exportRole);continue}
+  const wb=await C().parseXlsx(load),group=source.domestic?'DOMESTIC':source.kind;
+  const parsed=extractLoading(wb,source.kind,iso,source.domestic?[]:plans[source.kind],manifests,{domestic:!!source.domestic});
+  const allowed=!source.domestic&&plans[source.kind].length?new Set(plans[source.kind].map(j=>j.booking)):null;
   const vehicles=parsed.vehicles.filter(v=>!allowed||allowed.has(v.booking));
-  all.push(...vehicles);filesByKind[kind]={load,exp,sheetName:parsed.sheetName,vehicles};
-  log(kind+' พบ '+vehicles.length+' คันจาก Loading ('+parsed.sheetName+')');
+  all.push(...vehicles);
+  filesByKind[group]={load,exp,sheetName:parsed.sheetName,vehicles};
+  log(group+' พบ '+vehicles.length+' คันจาก Loading ('+parsed.sheetName+') → Export '+source.kind);
+ }
+ for(const kind of ['STP','PTR']){
+  if(get('export'+kind).length&&!get('loading'+kind).length&&!(kind==='STP'&&get('loadingDomestic').length))
+   warnings.push('มี Export '+kind+' แต่ยังไม่มี Loading สำหรับวันที่เลือก');
  }
  if(!all.length){
   const planned=[...plans.STP,...plans.PTR],plannedUnits=planned.reduce((n,j)=>n+(Number(j.fcl)||0),0);
-  warnings.push('ยังไม่มีรายการรถเข้าจริงใน Loading วันที่เลือก — ไม่ใช่ไฟล์ผิดหรือขาดไฟล์ทะเบียนรถ สามารถเก็บงานฉบับร่างไว้แล้วอัปเดตเมื่อรถเข้า');
-  if(plannedUnits)warnings.push('แผนมี '+plannedUnits+' ตู้ (ยังไม่ใช่ยอดรถเข้าจริง) — ห้ามนำไปนับเป็นรถที่โหลดแล้ว');
+  warnings.push('ยังไม่มีรายการรถเข้าจริงใน Loading วันที่เลือก — เก็บงานฉบับร่าง แล้วอัปเดตเมื่อมีรถ');
+  if(plannedUnits)warnings.push('แผน STP/PTR มี '+plannedUnits+' ตู้ (ยังไม่ใช่ยอดรถเข้าจริง)');
   log('DAILY รอรถเข้าจริง: แผน '+plannedUnits+' ตู้ / Loading 0 คัน');
   return {mode:'daily',plans,filesByKind,cards:[],warnings,bookings:new Set(planned.map(j=>j.kind+':'+j.booking)).size,units:0,plannedUnits,draftOnly:true};
  }
  const dup=new Set();
  for(const v of all){
   if(!v.booking)warnings.push(v.kind+' รถ '+v.carNo+' ไม่มี Booking');
-  if(!v.container)warnings.push(v.kind+' '+v.booking+' คัน '+v.carNo+' ยังไม่มีเลข Container');
+  if(!v.container&&v.kind!=='DOMESTIC')warnings.push(v.kind+' '+v.booking+' คัน '+v.carNo+' ยังไม่มีเลข Container');
   if(!v.registration)warnings.push(v.kind+' '+v.booking+' คัน '+v.carNo+' ยังไม่มีทะเบียนรถ');
   if(!v.weightCard||!v.gross||!v.net)warnings.push(v.kind+' '+v.booking+' คัน '+v.carNo+' ยังมีข้อมูลชั่งไม่ครบ — จะเว้นว่าง');
   const key=v.kind+'|'+v.booking+'|'+v.carNo;
   if(dup.has(key))warnings.push('พบลำดับรถซ้ำ: '+key);
   dup.add(key);
  }
- return {mode:'daily',plans,filesByKind,cards:all,warnings,bookings:new Set(all.map(x=>x.kind+':'+x.booking)).size,units:all.length};
+ return {mode:'daily',plans,filesByKind,cards:all,warnings,
+  bookings:new Set(all.map(x=>x.kind+':'+x.booking)).size,units:all.length};
 }
+
 function renderPreview(result){
  prepared=result;outputs=[];$('resultsCard').classList.add('hidden');$('previewCard').classList.remove('hidden');
  $('previewHint').textContent=result.mode==='prep'?'ข้อมูลที่ผ่านเงื่อนไข Load = KNS และไม่ Cancel — แก้จำนวนถุงได้หากแผนมีการเปลี่ยนแปลง':'ข้อมูลจาก Loading รายคัน — สามารถแก้ช่องรถและบัตรชั่งก่อนสร้าง Export ได้';
@@ -361,8 +393,8 @@ function findExportSheet(wb,iso){
  throw Error('ไม่พบชีต Export เดือน '+mon+' '+yyyy+' (ไฟล์มี '+wb.SheetNames.length+' ชีต) กรุณาตรวจไฟล์ให้ตรงวัน');
 }
 function exportMap(kind){
- return kind==='STP'?{date:'C',contract:'E',booking:'F',agent:'G',etd:'H',receipt:'I',place:'J',product:'K',batch:'L',code:'M',bags:'N',kg:'O',tare:'P',gross:'Q',net:'R',carrier:'T',car:'W',registration:'X',driver:'Y',container:'Z',seal:'AA',weightCard:'AB'}:
- {date:'A',contract:'C',booking:'D',agent:'E',etd:'F',receipt:'G',place:'H',product:'I',batch:'J',code:'K',bags:'L',kg:'M',tare:'N',gross:'O',net:'P',carrier:'R',car:'U',registration:'V',driver:'W',container:'X',seal:'Y',weightCard:'Z'};
+ return kind==='STP'?{date:'C',invoice:'D',contract:'E',booking:'F',agent:'G',etd:'H',receipt:'I',place:'J',product:'K',batch:'L',code:'M',bags:'N',kg:'O',tare:'P',gross:'Q',net:'R',carrier:'T',car:'W',registration:'X',driver:'Y',container:'Z',seal:'AA',weightCard:'AB'}:
+ {date:'A',invoice:'B',contract:'C',booking:'D',agent:'E',etd:'F',receipt:'G',place:'H',product:'I',batch:'J',code:'K',bags:'L',kg:'M',tare:'N',gross:'O',net:'P',carrier:'R',car:'U',registration:'V',driver:'W',container:'X',seal:'Y',weightCard:'Z'};
 }
 function colIndex(str){let n=0;for(const c of str)n=n*26+c.charCodeAt(0)-64;return n-1}
 async function preserveNewRowStyle(patcher,sheet,source,target){
@@ -380,91 +412,115 @@ async function preserveNewRowStyle(patcher,sheet,source,target){
  const after=rows.find(r=>Number(r.getAttribute('r'))>target);data.insertBefore(clone,after||null);
 }
 async function createDaily(){
- if(prepared?.draftOnly||!prepared?.cards?.length)throw Error('ยังไม่มีรถเข้าจริงใน Loading — เก็บงานฉบับร่างไว้ก่อน แล้วอัปโหลด Loading ล่าสุดเมื่อรถเข้า');
+ if(prepared?.draftOnly||!prepared?.cards?.length)throw Error('ยังไม่มีรถเข้าจริงใน Loading — บันทึกฉบับร่างแล้วอัปเดตเมื่อรถเข้า');
  const iso=validDate(),results=[],dateSerial=C().excelDate(iso);
  const normal=s=>String(s??'').toUpperCase().replace(/[^A-Z0-9]/g,'');
  const positive=v=>Number.isFinite(Number(v))&&Number(v)>0;
  for(const kind of ['STP','PTR']){
-  const source=prepared.filesByKind[kind];if(!source)continue;
-  const list=source.vehicles;
-  if(list.some(v=>!v.booking||!v.carNo))throw Error('Loading '+kind+' มี Booking หรือเลขคันไม่ครบ');
-  const seenInput=new Set();
-  for(const v of list){
-   const key=v.booking+'|'+v.carNo;
-   if(seenInput.has(key))throw Error('Loading มีลำดับรถซ้ำ '+key);
-   seenInput.add(key);
-   if(!v.container&&$('strictMode').value==='strict')throw Error('ยังไม่มีเลขตู้ '+v.booking+' คัน '+v.carNo);
-  }
-  const loadPatch=await C().ExcelPatch.load(source.load),expPatch=await C().ExcelPatch.load(source.exp);
-  const loadSheet=loadPatch.sheetByName(source.sheetName);
-  if(!loadSheet)throw Error('ไม่มีชีต Loading '+source.sheetName);
-  const original=await C().parseXlsx(source.exp),exportSheetName=findExportSheet(original,iso),expSheet=expPatch.sheetByName(exportSheetName);
+  // All non-PTR loading reports, including Domestic / SSAMS, share ONE STP Export workbook.
+  const groups=(kind==='STP'?['STP','DOMESTIC']:['PTR'])
+   .map(group=>({group,source:prepared.filesByKind[group]})).filter(x=>x.source);
+  if(!groups.length)continue;
+  const exp=sole('export'+kind);if(!exp)throw Error('ไม่มี Export '+kind+' รองรับ Loading');
+  const loadPatches={};
+  for(const {group,source} of groups)loadPatches[group]=await C().ExcelPatch.load(source.load);
+  const expPatch=await C().ExcelPatch.load(exp);
+  const original=await C().parseXlsx(exp),exportSheetName=findExportSheet(original,iso);
+  const expSheet=expPatch.sheetByName(exportSheetName);
   if(!expSheet)throw Error('ไม่พบชีต Export '+exportSheetName);
   const rows=C().sheetRows(original,exportSheetName),map=exportMap(kind);
-  // Match existing export rows by booking+container, not Booking+No.
-  // Export No. is often a daily serial and differs from Loading's per-booking car number.
   const existing=[],claimed=new Set();
   let last=6,maxDailyNo=0;
-  for(let r=6;r<=rows.length;r++){
-   const values=rows[r-1]||[];
-   const booking=C().clean(values[colIndex(map.booking)]);
-   const car=C().clean(values[colIndex(map.car)]);
-   const date=Number(values[colIndex(map.date)])||0;
+  for(let r=7;r<=rows.length;r++){
+   const values=rows[r-1]||[],booking=C().clean(values[colIndex(map.booking)]);
+   const car=C().clean(values[colIndex(map.car)]),date=Number(values[colIndex(map.date)])||0;
    if(booking)last=Math.max(last,r);
    if(date!==dateSerial||!booking)continue;
    maxDailyNo=Math.max(maxDailyNo,Number(car)||0);
-   existing.push({row:r,booking,container:normal(values[colIndex(map.container)]),registration:normal(values[colIndex(map.registration)]),car});
+   existing.push({row:r,booking,container:normal(values[colIndex(map.container)]),
+    registration:normal(values[colIndex(map.registration)]),
+    weightCard:normal(values[colIndex(map.weightCard)]),
+    place:normal(values[colIndex(map.place)]),
+    product:normal(values[colIndex(map.product)]),
+    code:normal(values[colIndex(map.code)]),
+    bags:Number(values[colIndex(map.bags)])||0,car});
   }
   let next=last+1,matched=0,added=0;
-  for(const v of list){
-   const matchingByContainer=existing.filter(r=>!claimed.has(r.row)&&r.booking===v.booking&&r.container&&r.container===normal(v.container));
-   if(matchingByContainer.length>1)throw Error('Export มีเลขตู้ซ้ำ '+v.booking+' '+v.container);
-   let target=matchingByContainer[0]||null;
-   if(!target&&!v.container){
-    const byReg=existing.filter(r=>!claimed.has(r.row)&&r.booking===v.booking&&r.registration&&r.registration===normal(v.registration));
-    if(byReg.length>1)throw Error('ทะเบียนซ้ำใน Export '+v.booking+' '+v.registration);
-    target=byReg[0]||null;
-   }
-   if(!target&&v.container){
-    const byReg=existing.filter(r=>!claimed.has(r.row)&&r.booking===v.booking&&r.registration&&r.registration===normal(v.registration));
-    if(byReg.length===1&&byReg[0].container)throw Error('เลขตู้ไม่ตรงกัน '+v.booking+' คัน '+v.carNo+' (Export '+byReg[0].container+' / Loading '+v.container+')');
-   }
-   let row,dayNo;
-   if(target){row=target.row;dayNo=target.car;claimed.add(row);matched++}
-   else{
-    row=next++;dayNo=++maxDailyNo;added++;
-    await preserveNewRowStyle(expPatch,expSheet,Math.max(6,last),row);
-    claimed.add(row);
-   }
-   const updatedLoad={I:v.carrier,J:v.registration,K:v.container,L:v.seal,U:v.weightCard,V:v.tare,W:v.gross,X:v.net};
-   for(const [col,val] of Object.entries(updatedLoad)){
-    if(val!==null&&val!==undefined&&val!=='')await loadPatch.setCell(loadSheet,col+v.row,val);
-   }
-   const desired={date:dateSerial,contract:v.contract,booking:v.booking,agent:v.agent,etd:(v.etd&&v.destination)?v.etd+'/'+v.destination:null,place:v.returnPlace,product:v.product,batch:v.batch,code:v.code,bags:v.bags||null,kg:v.kg||null,tare:v.tare,gross:v.gross,net:v.net,carrier:v.carrier,car:dayNo,registration:v.registration,driver:v.driver,container:v.container,seal:v.seal,weightCard:v.weightCard};
-   const oldValues=(rows[row-1]||[]);
-   const alwaysSync=new Set(['tare','gross','net','weightCard','registration','container','seal','product','batch','code','bags','kg','carrier']);
-   for(const [key,col] of Object.entries(map)){
-    const val=desired[key];
-    if(val===null||val===undefined||val==='')continue;
-    const old=oldValues[colIndex(col)];
-    const hasOld=old!==null&&old!==undefined&&String(old).trim()!=='';
-    if(!target||!hasOld||alwaysSync.has(key)){
-     if(key==='net'||key==='gross'||key==='tare'){if(!positive(val))continue}
-     await expPatch.setCell(expSheet,col+row,val);
+  for(const {group,source} of groups){
+   const loadPatch=loadPatches[group],loadSheet=loadPatch.sheetByName(source.sheetName);
+   if(!loadSheet)throw Error('ไม่มีชีต Loading '+source.sheetName);
+   const list=source.vehicles,seenInput=new Set();
+   for(const v of list){
+    const key=v.booking+'|'+v.carNo;
+    if(seenInput.has(key))throw Error('Loading '+group+' มีลำดับรถซ้ำ '+key);
+    seenInput.add(key);
+    if(!v.container&&group!=='DOMESTIC'&&$('strictMode').value==='strict')
+     throw Error('ยังไม่มีเลขตู้ '+v.booking+' คัน '+v.carNo);
+    const candidates=existing.filter(r=>!claimed.has(r.row)&&r.booking===v.booking);
+    // First match by container; domestic deliveries often have NO booking or container.
+    let match=candidates.filter(r=>normal(v.container)&&r.container===normal(v.container));
+    if(match.length>1)throw Error('เลขตู้ซ้ำ '+v.booking+' '+v.container);
+    let target=match[0]||null;
+    if(!target&&v.weightCard){
+     match=candidates.filter(r=>r.weightCard&&r.weightCard===normal(v.weightCard));
+     if(match.length>1)throw Error('Weight Card ซ้ำใน Export '+v.weightCard);
+     target=match[0]||null;
+    }
+    if(!target&&v.registration){
+     match=candidates.filter(r=>r.registration&&r.registration===normal(v.registration)&&
+       (group!=='DOMESTIC'||r.place===normal(v.returnPlace)));
+     if(match.length>1)throw Error('ทะเบียนซ้ำใน Export '+v.booking+' '+v.registration);
+     target=match[0]||null;
+    }
+    if(!target&&group==='DOMESTIC'&&!v.weightCard&&!v.registration){
+     match=candidates.filter(r=>r.place===normal(v.returnPlace)&&r.product===normal(v.product)&&
+       r.code===normal(v.code)&&r.bags===v.bags);
+     if(match.length===1)target=match[0];
+    }
+    // Never silently reuse a row when the identified container conflicts.
+    if(target&&v.container&&normal(v.container)!==normal('-')&&
+       target.container&&target.container!==normal(v.container))
+     throw Error('เลขตู้ไม่ตรงกัน '+v.booking+' คัน '+v.carNo);
+    let row,dayNo;
+    if(target){row=target.row;dayNo=target.car;claimed.add(row);matched++}
+    else{
+     row=next++;dayNo=++maxDailyNo;added++;
+     await preserveNewRowStyle(expPatch,expSheet,Math.max(7,last),row);
+     claimed.add(row);
+    }
+    // Fill confirmed edits back into the corresponding Loading workbook.
+    const updatedLoad={I:v.carrier,J:v.registration,K:v.container,L:v.seal,
+     U:v.weightCard,V:v.tare,W:v.gross,X:v.net};
+    for(const [col,val] of Object.entries(updatedLoad))
+     if(val!==null&&val!==undefined&&val!=='')await loadPatch.setCell(loadSheet,col+v.row,val);
+    const desired={date:dateSerial,invoice:v.invoice,contract:v.contract,booking:v.booking,
+     agent:v.agent,etd:(v.etd&&v.destination)?v.etd+'/'+v.destination:v.etd,
+     receipt:v.receipt,place:v.returnPlace,product:v.product,batch:v.batch,code:v.code,
+     bags:v.bags||null,kg:v.kg||null,tare:v.tare,gross:v.gross,net:v.net,
+     carrier:v.carrier,car:dayNo,registration:v.registration,driver:v.driver,
+     container:v.container,seal:v.seal,weightCard:v.weightCard};
+    const oldValues=rows[row-1]||[];
+    const alwaysSync=new Set(['invoice','contract','booking','agent','etd','receipt','place',
+     'tare','gross','net','weightCard','registration','container','seal',
+     'product','batch','code','bags','kg','carrier','driver']);
+    for(const [field,col] of Object.entries(map)){
+     const val=desired[field];
+     if(val===null||val===undefined||val==='')continue;
+     if(['net','gross','tare'].includes(field)&&!positive(val))continue;
+     const old=oldValues[colIndex(col)],hasOld=old!==null&&old!==undefined&&String(old).trim()!=='';
+     if(!target||!hasOld||alwaysSync.has(field))await expPatch.setCell(expSheet,col+row,val);
     }
    }
-   if(target){
-    const existingNo=C().clean(oldValues[colIndex(map.car)]);
-    if(existingNo&&String(existingNo)!==String(dayNo))throw Error('ลำดับ Export ไม่คงเดิม '+v.booking);
-   }
+   results.push(await loadPatch.save('AliceOffice_Loading_'+group+'_'+stamp(iso)+'.xlsx'));
+   log('Daily '+group+': '+list.length+' คัน → Export '+kind);
   }
-  results.push(await loadPatch.save('AliceOffice_Loading_'+kind+'_'+stamp(iso)+'.xlsx'));
   results.push(await expPatch.save('AliceOffice_Export_'+kind+'_'+stamp(iso)+'.xlsx'));
-  log('Daily '+kind+': '+list.length+' คัน, ตรงเลขตู้เดิม '+matched+', เพิ่มแถวใหม่ '+added);
+  log('Export '+kind+': จับคู่แถวเดิม '+matched+', เพิ่มแถว '+added);
  }
- if(!results.length)throw Error('ไม่พบคู่ไฟล์ Loading + Export ให้สร้างรายงาน');
+ if(!results.length)throw Error('ไม่พบคู่ Loading และ Export ให้สร้างรายงาน');
  return results;
 }
+
 async function generate(){
  if(busy||!prepared)return;busy=true;$('generateBtn').disabled=true;status('กำลังสร้างไฟล์ Excel กรุณาอย่าปิดหน้านี้...');
  try{
