@@ -9,7 +9,7 @@ const DAILY_EXTRA_GROUPS=[
  {title:'เอกสารและค่าขนส่ง',fields:[
   ['invoice','Invoice No.'],['contract','Contract No.'],['agent','Agent'],
   ['etd','ETD / Destination'],['receipt','Place of Receipt'],['returnPlace','Place of Return'],
-  ['driver','Driver Name'],['carrier','Truck Company'],['contractorTeam','Contractor Team'],['price','Price (THB)','number'],
+  ['driver','Driver Name'],['carrier','Truck Company'],['contractorTeam','Contractor Team'],['price','Price (THB)'],
   ['overnight','Overnight Charge']
  ]},
  {title:'เวลาและติดตามงาน',fields:[
