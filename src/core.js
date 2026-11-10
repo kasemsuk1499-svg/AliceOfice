@@ -40,6 +40,7 @@ function parseProducts(raw){return clean(raw).split(/\r?\n+/).map(x=>x.trim()).f
 function classify(file){
  const n=(file.name||'').toLowerCase();
  if(n.endsWith('.csv')){if(/stp\s*1|stp1/.test(n))return 'planSTP';if(/stp\s*2|stp2/.test(n))return 'planPTR';return 'planSTP'}
+ if(/(?:แผนส่งออก|batch\s*allocat|stock\s*allocat|rev\s*\d+\s*แผน)/i.test(n)&&/\.xlsx?$/.test(n))return 'planBatch';
  if(/ssams/i.test(n)&&/\.xlsx?$/.test(n))return 'planDomestic';
  if(/domestic\s*report|domestic_report/i.test(n)&&/\.xlsx?$/.test(n))return 'loadingDomestic';
  if(n.includes('export')||n.includes('ส่งออก'))return n.includes('ptr')?'exportPTR':'exportSTP';
