@@ -767,10 +767,35 @@ async function addCloudFiles(entries,{replaceRole=false,preservePreview=false}={
  renderFiles();if(!preservePreview)resetPreview();
  status('โหลดไฟล์จากคลาวด์ '+entries.length+' รายการแล้ว ตรวจสอบประเภทไฟล์ได้เลยค่ะ','good');
 }
-async function restoreCloudRun({date,mode:nextMode,entries}){
+async function restoreCloudRun({date,mode:nextMode,entries,cardData=[]}){
  files=[];outputs=[];showMode(nextMode);
  $('workDate').value=date;
  await addCloudFiles(entries,{replaceRole:false});
+ if(nextMode==='daily'&&cardData.length){
+  await analyze();
+  if(prepared?.mode==='daily'&&!prepared.draftOnly){
+   let restored=0;
+   const identity=x=>String(x??'').replace(/[^a-z0-9ก-๙]/gi,'').toUpperCase();
+   const used=new Set();
+   for(const v of prepared.cards){
+    const candidates=cardData.map((card,index)=>({card,index})).filter(({card,index})=>
+     !used.has(index)&&card.flow===v.kind&&card.booking===v.booking&&Number(card.car_no)===Number(v.carNo));
+    let match=candidates.find(({card})=>card.weightCard&&identity(card.weightCard)===identity(v.weightCard));
+    if(!match)match=candidates.find(({card})=>card.container&&identity(card.container)===identity(v.container));
+    if(!match&&candidates.length===1)match=candidates[0];
+    if(!match)continue;
+    used.add(match.index);
+    const card=match.card;
+    for(const key of ['registration','container','seal','tare','gross','net','weightCard']){
+     if(card[key]!==undefined&&card[key]!==null)v[key]=card[key];
+    }
+    if(card.extra&&typeof card.extra==='object')v.extra={...v.extra,...card.extra};
+    restored++;
+   }
+   renderPreview(prepared);
+   status('เรียกคืนข้อมูลที่กรอกในเว็บ '+restored+' คัน จาก Alice Cloud แล้ว ตรวจสอบก่อนสร้างไฟล์','good');
+  }
+ }
 }
 window.AliceOfficeUI={snapshot:cloudSnapshot,addCloudFiles,restoreCloudRun,log,status};
 function init(){
