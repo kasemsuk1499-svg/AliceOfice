@@ -2,7 +2,7 @@
 'use strict';
 const C=()=>window.AliceCore;
 const $=id=>document.getElementById(id);
-const roles=[['planSTP','แผน STP 1 (CSV)'],['planPTR','แผน STP 2 / PTR (CSV)'],['formSTP','ใบแจ้งโหลด STP'],['formPTR','ใบแจ้งโหลด PTR'],['loadingSTP','Loading STP'],['loadingPTR','Loading PTR'],['loadingDomestic','Domestic / SSAMS Loading'],['planDomestic','แผนโหลด SSAMS (อ้างอิง)'],['exportSTP','Export STP'],['exportPTR','Export PTR'],['truck','ข้อมูลรถขนส่ง'],['ignore','ไม่ใช้งาน']];
+const roles=[['planSTP','แผน STP 1 (CSV)'],['planPTR','แผน STP 2 / PTR (CSV)'],['formSTP','ใบแจ้งโหลด STP'],['formPTR','ใบแจ้งโหลด PTR'],['loadingSTP','Loading STP'],['loadingPTR','Loading PTR'],['loadingDomestic','Domestic / SSAMS Loading'],['planDomestic','แผนโหลด SSAMS (อ้างอิง)'],['planBatch','แผนแบช / ตำแหน่งจัดเก็บ (Rev)'],['exportSTP','Export STP'],['exportPTR','Export PTR'],['truck','ข้อมูลรถขนส่ง'],['ignore','ไม่ใช้งาน']];
 let mode='prep',files=[],counter=0,prepared=null,outputs=[],busy=false;
 
 const DAILY_EXTRA_GROUPS=[
@@ -191,11 +191,11 @@ function showMode(next){
  mode=next;resetPreview();
  $('tabPrep').classList.toggle('active',mode==='prep');$('tabDaily').classList.toggle('active',mode==='daily');
  $('uploadTitle').textContent=mode==='prep'?'1. นำเข้าไฟล์สำหรับเตรียมโหลด':'1. นำเข้า Loading / Export และไฟล์ขนส่ง';
- $('uploadDesc').textContent=mode==='prep'?'ใช้ CSV แผน STP1/STP2 และแบบใบแจ้งโหลด STP/PTR (.xlsx)':'ใช้ Loading STP/PTR, Domestic/SSAMS, Export STP/PTR พร้อมไฟล์รถขนส่ง (ถ้ามี) — Loading ทุกประเภทที่ไม่ใช่ PTR ลง Export STP';
+ $('uploadDesc').textContent=mode==='prep'?'ใช้ CSV STP1/STP2, แผนแบช Rev และแบบใบแจ้งโหลด STP/PTR (.xlsx)':'ใช้ Loading STP/PTR, Domestic/SSAMS, Export STP/PTR พร้อมไฟล์รถขนส่ง (ถ้ามี) — Loading ทุกประเภทที่ไม่ใช่ PTR ลง Export STP';
  $('rulesTitle').textContent=mode==='prep'?'กติกาเตรียมโหลด':'กติกา Daily Report';
  $('rulesPrep').classList.toggle('hidden',mode!=='prep');$('rulesDaily').classList.toggle('hidden',mode!=='daily');
  $('statUnitLabel').textContent=mode==='prep'?'จำนวนตู้':'จำนวนคัน';
- $('rulesNotice').innerHTML=mode==='prep'?'แม่แบบ STP/PTR ควรเป็น <b>ไฟล์ Excel เดิมที่มี Text Box</b> เพื่อรักษารูปแบบต้นฉบับ รวมทั้งหัวข้อ Gate No. ของ PTR':'ระบบจะนำข้อมูล <b>Loading ทุกส่วน</b> ที่มีช่องตรงกันลง Export: PTR → Export PTR; ส่วน STP และ Domestic/SSAMS → Export STP โดยไม่คัดลอกข้อมูลจากวันก่อน';
+ $('rulesNotice').innerHTML=mode==='prep'?'แผน Rev จะแสดงตำแหน่งคลัง Batch, Code และการจัดสรรแยกคัน โดยใช้สำหรับตรวจสอบ • แม่แบบ STP/PTR ควรเป็น <b>ไฟล์ Excel เดิมที่มี Text Box</b> เพื่อรักษารูปแบบต้นฉบับ รวมทั้งหัวข้อ Gate No. ของ PTR':'ระบบจะนำข้อมูล <b>Loading ทุกส่วน</b> ที่มีช่องตรงกันลง Export: PTR → Export PTR; ส่วน STP และ Domestic/SSAMS → Export STP โดยไม่คัดลอกข้อมูลจากวันก่อน';
  status('เลือกไฟล์สำหรับ '+(mode==='prep'?'งานเตรียมโหลด':'Daily Report')+' แล้วกดตรวจสอบได้เลยค่ะ');
 }
 async function readPlans(iso){
