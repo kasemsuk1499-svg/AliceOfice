@@ -224,8 +224,9 @@ async function analyzeDaily(iso,plans){
   if(!exp){warnings.push('มี '+source.role+' แต่ขาด '+source.exportRole);continue}
   const wb=await C().parseXlsx(load),group=source.domestic?'DOMESTIC':source.kind;
   const parsed=extractLoading(wb,source.kind,iso,source.domestic?[]:plans[source.kind],manifests,{domestic:!!source.domestic});
-  const allowed=!source.domestic&&plans[source.kind].length?new Set(plans[source.kind].map(j=>j.booking)):null;
-  const vehicles=parsed.vehicles.filter(v=>!allowed||allowed.has(v.booking));
+  // Loading is authoritative for DAILY. A CSV plan is only reference data;
+  // it must never hide a genuinely loaded vehicle from the export.
+  const vehicles=parsed.vehicles;
   all.push(...vehicles);
   filesByKind[group]={load,exp,sheetName:parsed.sheetName,vehicles};
   log(group+' พบ '+vehicles.length+' คันจาก Loading ('+parsed.sheetName+') → Export '+source.kind);
