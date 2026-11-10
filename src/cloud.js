@@ -147,11 +147,19 @@ async function restoreRun(date,workflow){
  if(!window.confirm('โหลดงาน '+date+' ('+workflow+') จากคลาวด์? ไฟล์ที่เลือกอยู่ในหน้านี้จะถูกแทนที่'))return;
  try{
   feedback('กำลังเรียกคืนงานวันที่ '+date+'...');
-  const {data,error}=await db.from('alice_office_files').select('role,filename,object_path,created_at').eq('owner_id',u.id).eq('category','source').eq('work_date',date).eq('workflow',workflow).order('created_at',{ascending:true}).limit(150);
+  const {data,error}=await db.from('alice_office_files').select('role,filename,object_path,created_at').eq('owner_id',u.id).eq('category','source').eq('work_date',date).eq('workflow',workflow).order('created_at',{ascending:false}).limit(150);
   if(error)throw Error(error.message);
   if(!data?.length)throw Error('ยังไม่มีไฟล์ต้นทางของงานนี้ในคลาวด์');
+  // Repeated saves create new versions. Restore the NEWEST for each unique
+  // Loading / Export / plan role, not every old version of the same role.
+  const latest=[],seen=new Set();
+  for(const row of data){
+   if(row.role!=='truck'&&seen.has(row.role))continue;
+   if(row.role!=='truck')seen.add(row.role);
+   latest.push(row);
+  }
   const entries=[];
-  for(const row of data)entries.push({role:row.role,file:await loadObject(row)});
+  for(const row of latest)entries.push({role:row.role,file:await loadObject(row)});
   const {data:snapshots,error:snapshotError}=await db.from('alice_office_drafts')
    .select('payload').eq('owner_id',u.id).eq('work_date',date).eq('workflow',workflow).limit(1);
   if(snapshotError)throw Error('เรียกข้อมูลที่กรอกไว้ไม่สำเร็จ: '+snapshotError.message);
