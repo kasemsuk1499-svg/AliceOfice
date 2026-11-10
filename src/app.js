@@ -722,14 +722,14 @@ async function createPrep(){
  const iso=validDate(),jobs=prepared.jobs;
  // Read displayed input values immediately before generating, not just the
  // change-event state. This prevents falsely rejecting filled-in quantities.
- const missing=updatePrepInputs(prepared);
- if(missing.length){
-  const idx=missing[0],card=prepared.cards[idx];
+ const incompleteBagIndices=updatePrepInputs(prepared);
+ if(incompleteBagIndices.length){
+  const idx=incompleteBagIndices[0],card=prepared.cards[idx];
   const el=$('previewRows').querySelector('.bagInput[data-i="'+idx+'"]');
   el?.focus();
   el?.scrollIntoView({behavior:'smooth',block:'center'});
   throw Error('กรุณาระบุจำนวนถุงให้ครบ: '+card.job.booking+' '+card.job.product+
-    ' คัน '+card.no+'/'+card.job.fcl+' (ยังขาด '+missing.length+' คัน)');
+    ' คัน '+card.no+'/'+card.job.fcl+' (ยังขาด '+incompleteBagIndices.length+' คัน)');
  }
  await resolvePrepTemplates(prepared.plans);
  const missing=missingPrepTemplates(prepared.plans);
