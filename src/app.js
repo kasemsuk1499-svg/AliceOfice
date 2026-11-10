@@ -331,10 +331,34 @@ function createPages(jobs){
  }
  return pages;
 }
-function sheetTitle(job,n){
- const productSuffix=job.booking==='035GX75579'?' '+job.product.replace(/[^A-Za-z0-9-]/g,'').slice(0,8):'';
- const base=(job.booking+productSuffix).slice(0,28);
- return (base+(n===1?'':' ('+n+')')).slice(0,31);
+function sheetTitle(job,multipleProducts=false){
+ // A booking can appear in several product groups on the same day.
+ // Include its product when necessary, but never change the booking printed
+ // inside the workbook's actual form.
+ const booking=C().clean(job.booking).replace(/[\\/:*?\[\]]/g,'-');
+ const product=C().clean(job.product).replace(/[\\/:*?\[\]]/g,'-');
+ const label=multipleProducts||booking==='035GX75579'?booking+' '+product:booking;
+ return label.trim().slice(0,31);
+}
+function prepareUniqueSheetNames(pages,jobs){
+ const productsByBooking=new Map();
+ for(const job of jobs){
+  const booking=C().clean(job.booking).toUpperCase();
+  if(!productsByBooking.has(booking))productsByBooking.set(booking,new Set());
+  productsByBooking.get(booking).add(C().clean(job.product).toUpperCase());
+ }
+ const used=new Set(),names=[];
+ for(const page of pages){
+  const job=page[0].job,booking=C().clean(job.booking).toUpperCase();
+  const base=sheetTitle(job,(productsByBooking.get(booking)?.size||0)>1);
+  let candidate=base,num=2;
+  while(used.has(candidate.toUpperCase())){
+   const suffix=' ('+num++ +')';
+   candidate=base.slice(0,31-suffix.length)+suffix;
+  }
+  used.add(candidate.toUpperCase());names.push(candidate);
+ }
+ return names;
 }
 function parseRequiredCount(jobs){return jobs.reduce((sum,x)=>sum+x.fcl,0)}
 function analyzePrep(plans){
@@ -666,7 +690,16 @@ async function prepFile(kind,jobs,iso,template){
  const x=await C().ExcelPatch.load(template),pages=createPages(jobs),needed=pages.length;
  if(x.sheets.length>needed){log('แม่แบบ '+kind+' มี '+x.sheets.length+' ชีต — ใช้ '+needed+' ชีตตามจำนวนคัน โดยไม่เปลี่ยนต้นฉบับ');await x.trimSheets(needed)}
  while(x.sheets.length<needed)await x.cloneSheet(x.sheets[x.sheets.length-1]);
- const names=new Map();
+ const sheetNames=prepareUniqueSheetNames(pages,jobs);
+ // Rename template sheets to unique temporary titles before assigning their
+ // final names. This also handles templates that already have Booking titles.
+ for(let p=0;p<x.sheets.length;p++){
+  const sh=x.sheets[p];
+  let candidate='__AliceTemp_'+String(p+1).padStart(3,'0'),serial=2;
+  while(x.sheets.some(other=>other!==sh&&other.name.toUpperCase()===candidate.toUpperCase()))
+   candidate='__AliceTemp_'+String(p+1).padStart(3,'0')+'_'+serial++;
+  if(sh.name!==candidate)await x.rename(sh,candidate);
+ }
  for(let p=0;p<pages.length;p++){
   const sh=x.sheets[p],items=pages[p];
   for(let side=0;side<2;side++){
@@ -713,10 +746,7 @@ async function prepFile(kind,jobs,iso,template){
     await x.setShape(sh,product,job.product,job.product.length>19?7:9);
    }
   }
-  const job=items[0].job;
-  const suffixKey=job.booking+'|'+job.product;
-  names.set(suffixKey,(names.get(suffixKey)||0)+1);
-  await x.rename(sh,sheetTitle(job,names.get(suffixKey)));
+  await x.rename(sh,sheetNames[p]);
  }
  // Final check of all user-facing generated textbox details before saving.
  for(let p=0;p<pages.length;p++)for(let side=0;side<2;side++){
