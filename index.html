@@ -31,6 +31,11 @@
 .daily-vehicle-row td{background:#fff}
 @media(max-width:1060px){.daily-extra-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:700px){.daily-extra-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.batch-controls{display:grid;grid-template-columns:1.2fr 1fr 1.7fr;gap:12px;margin:14px 0}
+.batch-controls label{display:grid;gap:6px;color:#60718d;font-size:11px;font-weight:700}
+.batch-controls input,.batch-controls select{border:1px solid #d8e2ee;border-radius:10px;padding:10px;color:#234263;background:#fff;width:100%;min-width:0}
+.batch-table{min-width:1000px}.batch-table td{font-size:11px;line-height:1.5}
+@media(max-width:680px){.batch-controls{grid-template-columns:1fr}.batch-controls label{gap:5px}}
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" defer></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
@@ -79,6 +84,24 @@
 </div></aside>
 </div>
 <section class="statgrid" aria-label="สรุปข้อมูล"><div class="stat"><div class="k">ไฟล์ที่นำเข้า</div><div class="v" id="statFiles">0</div><div class="foot">ไฟล์ทั้งหมด</div></div><div class="stat"><div class="k">Booking</div><div class="v" id="statBookings">—</div><div class="foot">เฉพาะงานที่ผ่านการกรอง</div></div><div class="stat"><div class="k" id="statUnitLabel">จำนวนตู้</div><div class="v" id="statUnits">—</div><div class="foot">รายการที่จะจัดทำ</div></div><div class="stat"><div class="k">รายการต้องตรวจ</div><div class="v" id="statWarnings">—</div><div class="foot">ก่อนสร้างเอกสาร</div></div></section>
+<section class="card report hidden" id="batchPlanCard">
+ <div class="cardhead"><div><h2>📦 รายละเอียดแผนแบชและตำแหน่งจัดเก็บ</h2><p class="sub" id="batchSummary">ตรวจสอบสินค้า แบช และ Qty Allocate ก่อนโหลด</p></div><span class="stepbadge">BATCH PLAN</span></div>
+ <div class="cardbody">
+  <p class="hint">ข้อมูลจากไฟล์ Rev แยกตามชีตสินค้า • รูปแบบ <b>1(6) 2(12)</b> หมายถึงคัน/ตู้ที่ 1 จำนวน 6 หน่วย และคัน/ตู้ที่ 2 จำนวน 12 หน่วยตาม UOM • <b>Sheet1</b> เป็นข้อมูลสต็อกอ้างอิง ไม่ใช่ยอดโหลด</p>
+  <div class="batch-controls">
+   <label>เลือกชีตสินค้า<select id="batchSheetFilter" aria-label="เลือกชีตสินค้า"></select></label>
+   <label>กรองคัน/ตู้<select id="batchCarFilter" aria-label="กรองคันหรือตู้"></select></label>
+   <label>ค้นหาแบช / โลเคชัน / สินค้า<input id="batchSearch" type="search" placeholder="กรอกรหัสแบช หรือ Location"></label>
+  </div>
+  <p id="batchCount" class="hint"></p>
+  <div class="table-scroll"><table class="data-table batch-table">
+   <thead><tr><th>Location</th><th>สินค้า</th><th>Batch</th><th>Code</th><th>Qty สต็อก</th><th>UOM</th><th>สถานะ</th><th>Qty Allocate ตามคัน</th></tr></thead>
+   <tbody id="batchRows"></tbody>
+  </table></div>
+  <p id="batchNotes" class="hint"></p>
+  <div id="batchChecks" class="notice"></div>
+  <div id="batchAlerts" class="notice warning hidden"></div>
+ </div></section>
 <section class="card report hidden" id="previewCard"><div class="cardhead"><div><h2>3. ตรวจสอบรายการ</h2><p class="sub" id="previewHint">ตรวจ Booking, สินค้าและจำนวนตู้ก่อนสร้างไฟล์</p></div><span class="stepbadge">REVIEW</span></div><div class="cardbody"><div class="table-scroll"><table class="data-table"><thead id="previewHead"></thead><tbody id="previewRows"></tbody></table></div><div id="warningsBox" class="notice warning hidden"></div><div class="actionbar"><button class="btn dark" id="generateBtn" type="button">⚡ สร้างไฟล์ Excel</button><span class="hint" id="generateHelp"></span></div></div></section>
 <section class="card report hidden" id="resultsCard"><div class="cardhead"><div><h2>4. ไฟล์ผลลัพธ์</h2><p class="sub">ดาวน์โหลด Excel เพื่อเปิดตรวจงานก่อนใช้งานจริง</p></div><span class="stepbadge">OUTPUT</span></div><div class="cardbody"><div class="downloadList" id="downloads"></div><div class="notice">โปรดเปิดตรวจหน้า Print Preview และเทียบกับเอกสารต้นทาง โดยเฉพาะตำแหน่ง Text Box ใน Excel รุ่นที่ใช้งาน</div></div></section>
 <section class="card report" id="logsCard"><div class="cardhead"><div><h2>บันทึกการประมวลผล</h2><p class="sub">แสดงรายการที่ระบบตรวจพบและสาเหตุเมื่อมีจุดที่ต้องแก้</p></div><span class="stepbadge">AUDIT</span></div><div class="cardbody"><div class="log" id="logs">Alice Office พร้อมทำงานค่ะ ✨</div></div></section>
