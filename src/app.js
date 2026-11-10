@@ -9,7 +9,7 @@ const DAILY_EXTRA_GROUPS=[
  {title:'เอกสารและค่าขนส่ง',fields:[
   ['invoice','Invoice No.'],['contract','Contract No.'],['agent','Agent'],
   ['etd','ETD / Destination'],['receipt','Place of Receipt'],['returnPlace','Place of Return'],
-  ['driver','Driver Name'],['contractorTeam','Contractor Team'],['price','Price (THB)','number'],
+  ['driver','Driver Name'],['carrier','Truck Company'],['contractorTeam','Contractor Team'],['price','Price (THB)','number'],
   ['overnight','Overnight Charge']
  ]},
  {title:'เวลาและติดตามงาน',fields:[
@@ -80,7 +80,7 @@ function initializeDailyExtra(v){
  const extra={...DAILY_DEFAULTS,
   invoice:v.invoice||'-',contract:v.contract||'-',agent:v.agent||'-',
   etd:(v.etd&&v.destination)?v.etd+'/'+v.destination:(v.etd||'-'),
-  returnPlace:v.returnPlace||'-',driver:v.driver||'-'};
+  returnPlace:v.returnPlace||'-',driver:v.driver||'-',carrier:v.carrier||'-'};
  recalcDailyScores(extra);return extra;
 }
 function matchExistingReportRow(rows,kind,v,dateSerial,claimed){
@@ -116,7 +116,7 @@ async function populateDailyExtras(iso,vehicles){
    const found=matchExistingReportRow(rows,kind,v,serial,claimed);
    if(!found)continue;
    v.existingExportRow=found.row;
-   for(const key of ['invoice','contract','agent','etd','receipt','driver']){
+   for(const key of ['invoice','contract','agent','etd','receipt','driver','carrier']){
     const cell=found.values[colIndex(map[key])];
     if(cell!==null&&cell!==undefined&&String(cell).trim()!=='')v.extra[key]=String(cell);
    }
@@ -685,7 +685,7 @@ async function createDaily(){
      claimed.add(row);
     }
     // Fill confirmed edits back into the corresponding Loading workbook.
-    const updatedLoad={I:v.carrier,J:v.registration,K:v.container,L:v.seal,
+    const updatedLoad={I:v.extra?.carrier??v.carrier,J:v.registration,K:v.container,L:v.seal,
      U:v.weightCard,V:v.tare,W:v.gross,X:v.net};
     for(const [col,val] of Object.entries(updatedLoad))
      if(val!==null&&val!==undefined&&val!=='')await loadPatch.setCell(loadSheet,col+v.row,val);
@@ -693,7 +693,7 @@ async function createDaily(){
     const desired={date:dateSerial,invoice:extra.invoice,contract:extra.contract,booking:v.booking,
      agent:extra.agent,etd:extra.etd,receipt:extra.receipt,place:extra.returnPlace,
      product:v.product,batch:v.batch,code:v.code,bags:v.bags||null,kg:v.kg||null,
-     tare:v.tare,gross:v.gross,net:v.net,carrier:v.carrier,car:dayNo,
+     tare:v.tare,gross:v.gross,net:v.net,carrier:extra.carrier,car:dayNo,
      registration:v.registration,driver:extra.driver,container:v.container,seal:v.seal,
      weightCard:v.weightCard};
     const oldValues=rows[row-1]||[];
