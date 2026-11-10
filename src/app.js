@@ -204,7 +204,13 @@ async function analyzeDaily(iso,plans){
   all.push(...vehicles);filesByKind[kind]={load,exp,sheetName:parsed.sheetName,vehicles};
   log(kind+' พบ '+vehicles.length+' คันจาก Loading ('+parsed.sheetName+')');
  }
- if(!all.length)throw Error('ไม่พบรถใน Loading สำหรับจัดทำรายงาน — ตรวจชื่อชีตวันที่ และอัปโหลด Loading + Export ให้ครบคู่');
+ if(!all.length){
+  const planned=[...plans.STP,...plans.PTR],plannedUnits=planned.reduce((n,j)=>n+(Number(j.fcl)||0),0);
+  warnings.push('ยังไม่มีรายการรถเข้าจริงใน Loading วันที่เลือก — ไม่ใช่ไฟล์ผิดหรือขาดไฟล์ทะเบียนรถ สามารถเก็บงานฉบับร่างไว้แล้วอัปเดตเมื่อรถเข้า');
+  if(plannedUnits)warnings.push('แผนมี '+plannedUnits+' ตู้ (ยังไม่ใช่ยอดรถเข้าจริง) — ห้ามนำไปนับเป็นรถที่โหลดแล้ว');
+  log('DAILY รอรถเข้าจริง: แผน '+plannedUnits+' ตู้ / Loading 0 คัน');
+  return {mode:'daily',plans,filesByKind,cards:[],warnings,bookings:new Set(planned.map(j=>j.kind+':'+j.booking)).size,units:0,plannedUnits,draftOnly:true};
+ }
  const dup=new Set();
  for(const v of all){
   if(!v.booking)warnings.push(v.kind+' รถ '+v.carNo+' ไม่มี Booking');
@@ -227,15 +233,17 @@ function renderPreview(result){
   $('previewRows').querySelectorAll('.bagInput').forEach(el=>el.addEventListener('change',()=>{const i=Number(el.dataset.i),n=Number(el.value);result.cards[i].bags=Number.isInteger(n)&&n>0?n:null;result.cards[i].category=n===20?'Pallet':'แบก';$('method'+i).textContent=result.cards[i].category}));
  }else{
   const editable=['registration','container','seal','tare','gross','net','weightCard'];
-  $('previewRows').innerHTML=result.cards.map((v,i)=>'<tr><td><span class="pill">'+v.kind+'</span></td><td><b>'+esc(v.booking)+'</b></td><td>'+v.carNo+'</td>'+editable.map(key=>'<td><input data-i="'+i+'" data-key="'+key+'" value="'+esc(v[key]??'')+'" placeholder="'+(key==='weightCard'?'ยังไม่มี':'—')+'"></td>').join('')+'</tr>').join('');
+  $('previewRows').innerHTML=result.draftOnly?'<tr><td colspan="10" class="empty">⏳ รอข้อมูลรถเข้าจริง — แผน '+fmt(result.plannedUnits||0)+' ตู้ / รถที่ยืนยันใน Loading 0 คัน บันทึกงานฉบับร่างไว้บน Alice Cloud ได้ แล้วเพิ่มไฟล์ Loading และทะเบียนรถเมื่อมีข้อมูล</td></tr>':result.cards.map((v,i)=>'<tr><td><span class="pill">'+v.kind+'</span></td><td><b>'+esc(v.booking)+'</b></td><td>'+v.carNo+'</td>'+editable.map(key=>'<td><input data-i="'+i+'" data-key="'+key+'" value="'+esc(v[key]??'')+'" placeholder="'+(key==='weightCard'?'ยังไม่มี':'—')+'"></td>').join('')+'</tr>').join('');
   $('previewRows').querySelectorAll('input').forEach(el=>el.addEventListener('change',()=>{const v=result.cards[Number(el.dataset.i)],key=el.dataset.key;v[key]=['tare','gross','net'].includes(key)?(Number(el.value)||null):el.value.trim()}));
  }
  const warnings=[...result.warnings];
  $('warningsBox').classList.toggle('hidden',!warnings.length);
  $('warningsBox').innerHTML=warnings.length?'<b>รายการที่ต้องระวัง ('+warnings.length+')</b><div style="max-height:160px;overflow:auto">'+warnings.slice(0,24).map(w=>'<div>• '+esc(w)+'</div>').join('')+(warnings.length>24?'<div>… และอีก '+(warnings.length-24)+' รายการ</div>':'')+'</div>':'';
- $('generateHelp').textContent=result.mode==='prep'?'ไฟล์ผลลัพธ์จะเป็น .xlsx ใหม่สำหรับดาวน์โหลด โดยไม่เปลี่ยนไฟล์ต้นทาง':'ระบบจะสร้าง Excel จากไฟล์ที่อัปโหลด ไม่เขียนทับไฟล์ต้นฉบับในเครื่อง';
+ $('generateBtn').disabled=!!result.draftOnly;
+ $('generateBtn').textContent=result.draftOnly?'⌛ รอรถเข้าจริงก่อนสร้าง Excel':'⚡ สร้างไฟล์ Excel';
+ $('generateHelp').textContent=result.draftOnly?'ขณะนี้เป็นฉบับร่าง — กด “บันทึกงานวันนี้” ใน Alice Cloud เพื่อเก็บไฟล์และแผนไว้ก่อน ไม่สร้างรายงานรถที่ยังไม่เข้าจริง':result.mode==='prep'?'ไฟล์ผลลัพธ์จะเป็น .xlsx ใหม่สำหรับดาวน์โหลด โดยไม่เปลี่ยนไฟล์ต้นทาง':'ระบบจะสร้าง Excel จากไฟล์ที่อัปโหลด ไม่เขียนทับไฟล์ต้นฉบับในเครื่อง';
  stat(files.length,result.bookings,result.units,warnings.length);
- status('วิเคราะห์สำเร็จ '+result.units+' '+(result.mode==='prep'?'ตู้':'คัน')+' — ตรวจรายการก่อนกดสร้างไฟล์','good');
+ status(result.draftOnly?'อ่านไฟล์สำเร็จ — รอข้อมูลรถเข้าจริง (แผน '+fmt(result.plannedUnits)+' ตู้ / Loading 0 คัน) สามารถบันทึกงานฉบับร่างใน Alice Cloud ได้':'วิเคราะห์สำเร็จ '+result.units+' '+(result.mode==='prep'?'ตู้':'คัน')+' — ตรวจรายการก่อนกดสร้างไฟล์',result.draftOnly?'info':'good');
  $('previewCard').scrollIntoView({behavior:'smooth',block:'start'});
 }
 async function analyze(){
@@ -372,6 +380,7 @@ async function preserveNewRowStyle(patcher,sheet,source,target){
  const after=rows.find(r=>Number(r.getAttribute('r'))>target);data.insertBefore(clone,after||null);
 }
 async function createDaily(){
+ if(prepared?.draftOnly||!prepared?.cards?.length)throw Error('ยังไม่มีรถเข้าจริงใน Loading — เก็บงานฉบับร่างไว้ก่อน แล้วอัปโหลด Loading ล่าสุดเมื่อรถเข้า');
  const iso=validDate(),results=[],dateSerial=C().excelDate(iso);
  const normal=s=>String(s??'').toUpperCase().replace(/[^A-Z0-9]/g,'');
  const positive=v=>Number.isFinite(Number(v))&&Number(v)>0;
