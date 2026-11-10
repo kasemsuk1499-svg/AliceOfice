@@ -574,6 +574,11 @@ async function analyzeDaily(iso,plans){
  }
  if(!all.length){
   const planned=[...plans.STP,...plans.PTR],plannedUnits=planned.reduce((n,j)=>n+(Number(j.fcl)||0),0);
+  const notices=[...get('formSTP'),...get('formPTR')];
+  if(notices.length){
+   warnings.push('พบใบแจ้งโหลด '+notices.length+' ไฟล์ แต่ไฟล์นี้เป็นใบเตรียมโหลด ไม่ใช่ Loading Report ที่บันทึกสินค้าและน้ำหนักชั่งจริง');
+   warnings.push('สำหรับ Daily Report ต้องใส่ Loading Report STP/PTR และ Exporting Report ของวันนั้นด้วย — รหัสตู้/ทะเบียน/บัตรชั่งห้ามคัดจากแผนโดยเดา');
+  }
   warnings.push('ยังไม่มีรายการรถเข้าจริงใน Loading วันที่เลือก — เก็บงานฉบับร่าง แล้วอัปเดตเมื่อมีรถ');
   if(plannedUnits)warnings.push('แผน STP/PTR มี '+plannedUnits+' ตู้ (ยังไม่ใช่ยอดรถเข้าจริง)');
   log('DAILY รอรถเข้าจริง: แผน '+plannedUnits+' ตู้ / Loading 0 คัน');
