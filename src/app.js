@@ -728,22 +728,22 @@ async function prepFile(kind,jobs,iso,template){
    const job=it.job,n=it.no;
    const bags=job._cardBagValues?.[n-1]??job.bags;
    if(!bags)throw Error('ไม่พบจำนวนถุง '+job.booking+' คัน '+n);
-   await x.setShape(sh,date,dt(iso),11);
-   await x.setShape(sh,seq,n+'/'+job.fcl+'\n'+(bags===20?'Pallet':'แบก'),11);
-   await x.setShape(sh,book,job.booking,12);
-   await x.setShape(sh,contract,job.contract,job.contract.length>34?7.5:9.5);
-   await x.setShape(sh,etd,getETD(job),10);
+   await x.setShape(sh,date,dt(iso),10.5);
+   await x.setShape(sh,seq,n+'/'+job.fcl+'\n'+(bags===20?'Pallet':'แบก'),10.5);
+   await x.setShape(sh,book,job.booking,10.5);
+   await x.setShape(sh,contract,job.contract,9);
+   await x.setShape(sh,etd,getETD(job),9);
    await x.setShape(sh,close,job.closing+' ('+job.closingTime+')',9);
    await x.setShape(sh,destination,job.destination,9);
    await x.setShape(sh,agent,job.agent,9);
    await x.setShape(sh,place,job.place,9);
    if(kind==='STP'){
-    await x.setShape(sh,detail,job.packaging,8.2);
+    await x.setShape(sh,detail,job.packaging,8.5);
     await x.setShape(sh,quantity,'Qty per Fcl : '+bags+' Bags',9);
    }else{
     const rect='Product Name:  \nBatch Number :  \nCode No :  \nMFG :  \nEXP:  \nQuantity :   '+bags+'  Bag';
-    await x.setShape(sh,detail,rect,8.4);
-    await x.setShape(sh,product,job.product,job.product.length>19?7:9);
+    await x.setShape(sh,detail,rect,8.5);
+    await x.setShape(sh,product,job.product,9);
    }
   }
   await x.rename(sh,sheetNames[p]);
