@@ -574,7 +574,7 @@ function renderPreview(result){
  $('generateHelp').textContent=result.draftOnly?'ขณะนี้เป็นฉบับร่าง — กด “บันทึกงานวันนี้” ใน Alice Cloud เพื่อเก็บไฟล์และแผนไว้ก่อน ไม่สร้างรายงานรถที่ยังไม่เข้าจริง':
  result.mode==='prep'?'ไฟล์ผลลัพธ์จะเป็น .xlsx ใหม่สำหรับดาวน์โหลด โดยไม่เปลี่ยนไฟล์ต้นทาง':'ระบบจะสร้าง Excel จากไฟล์ที่อัปโหลด ไม่เขียนทับไฟล์ต้นฉบับในเครื่อง';
  stat(files.length,result.bookings,result.units,warnings.length);
- status(result.draftOnly?'อ่านไฟล์สำเร็จ — รอข้อมูลรถเข้าจริง (แผน '+fmt(result.plannedUnits)+' ตู้ / Loading 0 คัน) สามารถบันทึกงานฉบับร่างใน Alice Cloud ได้':'วิเคราะห์สำเร็จ '+result.units+' '+(result.mode==='prep'?'ตู้':'คัน')+' — ตรวจรายการก่อนกดสร้างไฟล์',result.draftOnly?'info':'good');
+ status(result.planOnly?'อ่านแผนแบชสำเร็จ — ตรวจรายละเอียดตำแหน่งสินค้าและ Qty Allocate ในตารางด้านบน':result.draftOnly?'อ่านไฟล์สำเร็จ — รอข้อมูลรถเข้าจริง (แผน '+fmt(result.plannedUnits)+' ตู้ / Loading 0 คัน) สามารถบันทึกงานฉบับร่างใน Alice Cloud ได้':'วิเคราะห์สำเร็จ '+result.units+' '+(result.mode==='prep'?'ตู้':'คัน')+' — ตรวจรายการก่อนกดสร้างไฟล์',result.draftOnly?'info':'good');
  $('previewCard').scrollIntoView({behavior:'smooth',block:'start'});
 }
 
@@ -588,7 +588,8 @@ async function analyze(){
   const result=mode==='prep'?analyzePrep(plan):await analyzeDaily(iso,plan);
   result.batchPlan=batchPlan;
   if(batchPlan&&result.mode==='daily'&&result.cards.length){const comparison=compareBatchPlan(batchPlan,result.cards);result.batchChecks=comparison.checks;result.warnings.push(...comparison.notes)}
-  renderPreview(result);renderBatchPlan(batchPlan,result.batchChecks||[]);log('วิเคราะห์สำเร็จ: '+result.bookings+' Booking / '+result.units+' คัน / แจ้งเตือน '+result.warnings.length);
+  renderPreview(result);renderBatchPlan(batchPlan,result.batchChecks||[]);
+  if(result.planOnly){$('previewCard').classList.add('hidden');$('batchPlanCard').scrollIntoView({behavior:'smooth',block:'start'})}log('วิเคราะห์สำเร็จ: '+result.bookings+' Booking / '+result.units+' คัน / แจ้งเตือน '+result.warnings.length);
  }catch(e){status(e.message,'error');log('ERROR '+e.message);console.error(e)}
  finally{busy=false;$('analyzeBtn').disabled=false}
 }
