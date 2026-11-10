@@ -137,16 +137,44 @@ class ExcelPatch {
   const anchors=await this.shapeAnchors(sheet),anchor=anchors[index-1];if(!anchor)throw Error('ไม่พบ Text Box ลำดับ '+index+' ใน '+sheet.name);
   const sp=one(anchor,'sp');if(!sp)throw Error('วัตถุลำดับ '+index+' ไม่ใช่กล่องข้อความ');
   const body=one(sp,'txBody');if(!body)throw Error('Text Box ไม่มี txBody');
-  const firstRun=find(body,'rPr');const sample=firstRun?firstRun.cloneNode(true):null;
+  const doc=body.ownerDocument,contents=String(value??'');
+  const firstRun=find(body,'rPr'),sample=firstRun?firstRun.cloneNode(true):null;
+  // The supplied STP/PTR templates mix spAutoFit (grows a shape over its
+  // neighbors) and noAutofit (clips text). Neither is safe for variable data.
+  // Text-to-fit keeps the ORIGINAL textbox dimensions and the whole string.
+  const bodyPr=one(body,'bodyPr');
+  if(bodyPr){
+   for(const option of ['spAutoFit','noAutofit','normAutofit'])
+    l(bodyPr,option).forEach(n=>n.remove());
+   bodyPr.appendChild(doc.createElementNS(NS.a,'a:normAutofit'));
+   bodyPr.setAttribute('wrap',contents.includes('\n')?'square':'none');
+   bodyPr.setAttribute('vertOverflow','clip');
+   bodyPr.setAttribute('horzOverflow','clip');
+   // Consistent insets for both halves of the form. The template has
+   // asymmetric margins which previously consumed usable textbox space.
+   bodyPr.setAttribute('lIns','12700');
+   bodyPr.setAttribute('rIns','12700');
+   bodyPr.setAttribute('tIns','0');
+   bodyPr.setAttribute('bIns','0');
+  }
   l(body,'p').forEach(p=>p.remove());
-  const doc=body.ownerDocument;
-  String(value??'').split(/\r\n|\r|\n/).forEach(line=>{
+  const uniformSize=Math.round(Math.max(8,Math.min(11,Number(size)||9))*100);
+  contents.split(/\r\n|\r|\n/).forEach(line=>{
    const p=doc.createElementNS(NS.a,'a:p'),r=doc.createElementNS(NS.a,'a:r');
    const rp=sample?doc.importNode(sample,true):doc.createElementNS(NS.a,'a:rPr');
-   rp.setAttribute('lang','th-TH');rp.setAttribute('sz',String(Math.round(size*100)));
-   r.appendChild(rp);const t=doc.createElementNS(NS.a,'a:t');t.textContent=line;t.setAttribute('xml:space','preserve');r.appendChild(t);p.appendChild(r);body.appendChild(p);
+   rp.setAttribute('lang','th-TH');rp.setAttribute('sz',String(uniformSize));
+   // Force one Thai/Latin-capable face; cloned template runs can otherwise
+   // mix theme fonts and different fallback faces in the same paragraph.
+   for(const tag of ['latin','ea','cs']){
+    let font=one(rp,tag);
+    if(!font){font=doc.createElementNS(NS.a,'a:'+tag);rp.appendChild(font)}
+    font.setAttribute('typeface','Tahoma');
+   }
+   r.appendChild(rp);
+   const t=doc.createElementNS(NS.a,'a:t');t.textContent=line;t.setAttribute('xml:space','preserve');
+   r.appendChild(t);p.appendChild(r);body.appendChild(p);
   });
-  const shape=one(anchor,'sp');const cNvPr=find(shape,'cNvPr');if(!cNvPr)throw Error('ไม่พบข้อมูลรูปทรง');
+  const cNvPr=find(sp,'cNvPr');if(!cNvPr)throw Error('ไม่พบข้อมูลรูปทรง');
  }
  async shapeText(sheet,index){const anchors=await this.shapeAnchors(sheet);const sp=one(anchors[index-1],'sp');return all(one(sp,'txBody'),'t').map(n=>n.textContent).join('\n')}
  async rename(sheet,name){
