@@ -160,6 +160,8 @@ function extractLoading(wb,kind,iso,plan,manifests,{domestic=false}={}){
    context={...context,booking:book,contract:C().clean(row[0])||context.contract,agent:C().clean(row[4])||context.agent,etd:C().clean(row[5])||context.etd,destination:'',returnPlace:''};
   }
   if(header){current=null;continue}
+  // Footer labels terminate the vehicle detail block; never count SUM totals as a product line.
+  if(/invoice\s*no|place of delivery|loading at factory date|detail printing|^remark\b/i.test(C().clean(row[0]))){current=null;continue}
   const isCar=Number.isInteger(no)&&no>=1&&no<=200&&C().clean(row[7])!=='';
   if(isCar){
    if(!context.booking)continue;
