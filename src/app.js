@@ -295,9 +295,9 @@ function renderBatchPlan(plan,checks=[]){
   }
   const n=Number(car.value),term=C().clean(search.value).toUpperCase();
   const rows=section.rows.filter(r=>(!n||r.allocation.some(x=>x.carNo===n))&&
-   (!term||[r.location,r.product,r.batch,r.code,r.status,r.allocationText].join(' ').toUpperCase().includes(term)));
+   (!term||[r.product,r.batch,r.code,r.status,r.allocationText].join(' ').toUpperCase().includes(term)));
   $('batchRows').innerHTML=rows.slice(0,120).map(r=>
-   '<tr><td>'+esc(r.location)+'</td><td>'+esc(r.product)+'</td><td>'+esc(r.batch)+'</td>'+
+   '<tr><td>'+esc(r.product)+'</td><td>'+esc(r.batch)+'</td>'+
    '<td>'+esc(r.code)+'</td><td>'+fmt(r.stock)+'</td><td>'+esc(r.uom)+'</td>'+
    '<td>'+esc(r.status)+'</td><td><b>'+esc(n?r.allocation.filter(x=>x.carNo===n).map(x=>x.carNo+'('+x.qty+')').join(' '):r.allocationText)+'</b></td></tr>').join('');
   $('batchCount').textContent=fmt(rows.length)+' รายการ'+(rows.length>120?' (แสดง 120 รายการแรก — ค้นหาเพื่อดูรายการอื่น)':'');
